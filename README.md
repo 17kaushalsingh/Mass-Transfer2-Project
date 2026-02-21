@@ -366,18 +366,49 @@ All members collaborate on `gui/` integration.
 ## Setup Instructions
 
 ```bash
-# Clone/navigate to project
+# Clone the repository
+git clone https://github.com/17kaushalsingh/Mass-Transfer2-Project.git
 cd Mass-Transfer2-Project
 
-# Activate virtual environment
+# Create and activate virtual environment
+python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies (already installed)
+# Install dependencies
 pip install -r requirements.txt
 
-# Run the application (after implementation)
-python -m src.gui.main_window
+# Run the GUI application
+python -m src.gui
+
+# Run all tests (53 tests)
+python -m pytest tests/ -v
 ```
+
+---
+
+## Current Status
+
+All 6 phases are implemented and tested:
+
+| Phase | Module | Status | Tests |
+|-------|--------|--------|-------|
+| Phase 0 | Equilibrium Model | Complete | 18/18 passing |
+| Phase 1 | Crosscurrent Solver | Complete | 7/7 passing |
+| Phase 2 | Countercurrent Solver | Complete | 14/14 passing |
+| Phase 3 | Visualizations | Complete | Import verified |
+| Phase 4 | Surrogate Model | Complete | 14/14 passing |
+| Phase 5 | PyQt6 GUI | Complete | Import verified |
+| **Total** | | **All complete** | **53/53 passing** |
+
+---
+
+## Quick Start
+
+1. **Launch the GUI:** `python -m src.gui`
+2. The default cottonseed oil equilibrium data loads automatically
+3. Go to **Simulation** tab → select mode → click **Run Simulation**
+4. View results in **Heatmaps** tab
+5. Train a surrogate model in **Surrogate Model** tab
 
 ---
 
