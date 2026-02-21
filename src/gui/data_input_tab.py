@@ -193,21 +193,28 @@ class DataInputTab(QWidget):
         ax1 = self.canvas.figure.add_subplot(211)
         ax2 = self.canvas.figure.add_subplot(212)
 
-        # Triangle diagram
-        A_dense = np.linspace(max(0.1, min(data.A_raff)), max(data.A_raff), 200)
-        C_raff_dense = [self.eq_model.C_raff_from_A(a) for a in A_dense]
-        A_ext_dense = np.linspace(min(data.A_ext), max(data.A_ext), 200)
-        C_ext_dense = [self.eq_model.C_ext_from_A(a) for a in A_ext_dense]
+        # Triangle diagram (B-C axes — standard LLE convention)
+        B_raff_dense = np.linspace(min(data.B_raff), max(data.B_raff), 200)
+        C_raff_dense = [self.eq_model.C_raff_from_B(b) for b in B_raff_dense]
+        B_ext_dense = np.linspace(min(data.B_ext), max(data.B_ext), 200)
+        C_ext_dense = [self.eq_model.C_ext_from_B(b) for b in B_ext_dense]
 
-        ax1.plot(A_dense, C_raff_dense, "b-", lw=2, label="Raffinate")
-        ax1.plot(A_ext_dense, C_ext_dense, "r-", lw=2, label="Extract")
-        for i in range(len(data.A_raff)):
-            ax1.plot([data.A_raff[i], data.A_ext[i]],
+        ax1.plot(B_raff_dense, C_raff_dense, "b-", lw=2, label="Raffinate")
+        ax1.plot(B_ext_dense, C_ext_dense, "r-", lw=2, label="Extract")
+        for i in range(len(data.B_raff)):
+            ax1.plot([data.B_raff[i], data.B_ext[i]],
                      [data.C_raff[i], data.C_ext[i]], "k--", lw=0.7, alpha=0.5)
-        ax1.scatter(data.A_raff, data.C_raff, c="blue", s=25, zorder=5)
-        ax1.scatter(data.A_ext, data.C_ext, c="red", s=25, zorder=5)
-        ax1.set_xlabel("wt% A"); ax1.set_ylabel("wt% C")
+        ax1.scatter(data.B_raff, data.C_raff, c="blue", s=25, zorder=5)
+        ax1.scatter(data.B_ext, data.C_ext, c="red", s=25, zorder=5)
+        if self.eq_model.plait_point is not None:
+            pp = self.eq_model.plait_point
+            ax1.plot(pp[2], pp[1], "g*", markersize=12, label="Plait pt.")
+        ax1.plot([0, 100], [0, 0], "k-", lw=1.5)
+        ax1.plot([0, 0], [0, 100], "k-", lw=1.5)
+        ax1.plot([100, 0], [0, 100], "k-", lw=1.5)
+        ax1.set_xlabel("wt% B (Solvent / Propane)"); ax1.set_ylabel("wt% C (Solute / Oleic Acid)")
         ax1.set_title("Phase Envelope"); ax1.legend(fontsize=9)
+        ax1.set_xlim(-2, 105); ax1.set_ylim(-2, 105); ax1.set_aspect("equal")
         ax1.grid(True, alpha=0.3)
 
         # Distribution
