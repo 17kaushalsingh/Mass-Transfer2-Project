@@ -53,9 +53,13 @@ class EquilibriumModel:
     """Fitted equilibrium model with callable interpolation functions."""
     tie_line_data: TieLineData
 
-    # Phase envelope on ternary triangle (C = f(A))
+    # Phase envelope on ternary triangle — A-axis fits (internal use)
     C_raff_from_A: Callable[[float], float] = field(repr=False)
     C_ext_from_A: Callable[[float], float] = field(repr=False)
+
+    # Phase envelope on ternary triangle — B-axis fits (for correct B-x-axis plot)
+    C_raff_from_B: Callable[[float], float] = field(repr=False)
+    C_ext_from_B: Callable[[float], float] = field(repr=False)
 
     # Distribution curve
     Y_from_X: Callable[[float], float] = field(repr=False)
@@ -254,6 +258,30 @@ def fit_equilibrium_model(data: TieLineData, raff_degree: int = 4,
         data.X, data.Y, conj_degree
     )
 
+    # --- B-axis phase envelope fits: C = f(B) for correct ternary triangle ---
+    # Sort by B ascending for well-behaved fitting
+    raff_order = np.argsort(data.B_raff)
+    C_raff_from_B_func, r2["C_raff_from_B"], coeffs["C_raff_from_B"] = _fit_poly(
+        data.B_raff[raff_order], data.C_raff[raff_order], raff_degree
+    )
+
+    # Extract phase: use spline (narrow, non-monotone range)
+    ext_order = np.argsort(data.B_ext)
+    C_ext_from_B_spline, r2_ext_B_spline = _fit_cubic_spline(
+        data.B_ext[ext_order], data.C_ext[ext_order]
+    )
+    C_ext_from_B_poly, r2_ext_B_poly, coeffs_ext_B = _fit_poly(
+        data.B_ext[ext_order], data.C_ext[ext_order], ext_degree
+    )
+    if r2_ext_B_spline > r2_ext_B_poly:
+        C_ext_from_B_func = C_ext_from_B_spline
+        r2["C_ext_from_B"] = r2_ext_B_spline
+        coeffs["C_ext_from_B"] = None
+    else:
+        C_ext_from_B_func = C_ext_from_B_poly
+        r2["C_ext_from_B"] = r2_ext_B_poly
+        coeffs["C_ext_from_B"] = coeffs_ext_B
+
     # Wrap numpy callables to accept scalar floats
     def _wrap(func):
         def wrapped(val):
@@ -271,6 +299,8 @@ def fit_equilibrium_model(data: TieLineData, raff_degree: int = 4,
         tie_line_data=data,
         C_raff_from_A=_wrap(C_raff_func),
         C_ext_from_A=_wrap(C_ext_func) if callable(C_ext_func) else C_ext_func,
+        C_raff_from_B=_wrap(C_raff_from_B_func),
+        C_ext_from_B=C_ext_from_B_func if callable(C_ext_from_B_func) else _wrap(C_ext_from_B_func),
         Y_from_X=_wrap(Y_func),
         N_raff_from_X=_wrap(N_raff_func),
         N_ext_from_Y=_wrap(N_ext_func),

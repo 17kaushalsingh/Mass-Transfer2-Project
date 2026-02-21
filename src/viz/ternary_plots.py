@@ -1,8 +1,10 @@
 """
 Ternary diagram visualizations for liquid-liquid extraction.
 
-Right-angle triangle convention:
-    x-axis = wt% A (carrier), y-axis = wt% C (solute), B = 100 - A - C
+Right-angle triangle convention (standard LLE):
+    x-axis = wt% B (solvent / Propane)
+    y-axis = wt% C (solute  / Oleic Acid)
+    A (carrier) = 100 - B - C  (implied, not plotted)
 """
 
 from __future__ import annotations
@@ -40,43 +42,45 @@ def plot_right_angle_triangle(
     data = eq_model.tie_line_data
     fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-    # Phase envelope curves
-    A_raff_dense = np.linspace(min(data.A_raff), max(data.A_raff), 200)
-    C_raff_dense = np.array([eq_model.C_raff_from_A(a) for a in A_raff_dense])
+    # Phase envelope curves — plotted on B (solvent) vs C (solute) axes
+    B_raff_dense = np.linspace(min(data.B_raff), max(data.B_raff), 200)
+    C_raff_dense = np.array([eq_model.C_raff_from_B(b) for b in B_raff_dense])
 
-    A_ext_dense = np.linspace(min(data.A_ext), max(data.A_ext), 200)
-    C_ext_dense = np.array([eq_model.C_ext_from_A(a) for a in A_ext_dense])
+    B_ext_dense = np.linspace(min(data.B_ext), max(data.B_ext), 200)
+    C_ext_dense = np.array([eq_model.C_ext_from_B(b) for b in B_ext_dense])
 
-    ax.plot(A_raff_dense, C_raff_dense, "b-", linewidth=2, label="Raffinate curve")
-    ax.plot(A_ext_dense, C_ext_dense, "r-", linewidth=2, label="Extract curve")
+    ax.plot(B_raff_dense, C_raff_dense, "b-", linewidth=2, label="Raffinate curve")
+    ax.plot(B_ext_dense, C_ext_dense, "r-", linewidth=2, label="Extract curve")
 
     # Data points
-    ax.scatter(data.A_raff, data.C_raff, c="blue", s=40, zorder=5)
-    ax.scatter(data.A_ext, data.C_ext, c="red", s=40, zorder=5)
+    ax.scatter(data.B_raff, data.C_raff, c="blue", s=40, zorder=5)
+    ax.scatter(data.B_ext, data.C_ext, c="red", s=40, zorder=5)
 
-    # Tie lines
-    for i in range(len(data.A_raff)):
-        ax.plot([data.A_raff[i], data.A_ext[i]],
+    # Tie lines  (connect raffinate to extract end of each tie line)
+    for i in range(len(data.B_raff)):
+        ax.plot([data.B_raff[i], data.B_ext[i]],
                 [data.C_raff[i], data.C_ext[i]],
                 "k--", linewidth=0.8, alpha=0.5)
 
-    # Plait point
+    # Plait point (stored as (A, C, B), so index [2]=B, [1]=C)
     if eq_model.plait_point is not None:
         pp = eq_model.plait_point
-        ax.plot(pp[0], pp[1], "g*", markersize=15, label="Plait point (est.)")
+        ax.plot(pp[2], pp[1], "g*", markersize=15, label="Plait point (est.)")
 
-    # Stage overlay
+    # Stage overlay — expects (B, C) tuples when called with the corrected convention
     if stage_points is not None:
-        for i, (A, C) in enumerate(stage_points):
-            ax.plot(A, C, "ko", markersize=8)
-            ax.annotate(f"  {i+1}", (A, C), fontsize=9)
+        for i, (B, C) in enumerate(stage_points):
+            ax.plot(B, C, "ko", markersize=8)
+            ax.annotate(f"  {i+1}", (B, C), fontsize=9)
 
     # Triangle boundary
-    ax.plot([0, 100], [0, 0], "k-", linewidth=1.5)
-    ax.plot([0, 0], [0, 100], "k-", linewidth=1.5)
-    ax.plot([100, 0], [0, 100], "k-", linewidth=1.5)
+    # Vertices: pure-A=(0,0), pure-B=(100,0), pure-C=(0,100)
+    # Right angle at origin; hypotenuse is B+C=100 (A=0 line)
+    ax.plot([0, 100], [0, 0], "k-", linewidth=1.5)   # bottom leg  (C=0)
+    ax.plot([0, 0], [0, 100], "k-", linewidth=1.5)   # left leg    (B=0)
+    ax.plot([100, 0], [0, 100], "k-", linewidth=1.5)  # hypotenuse  (A=0)
 
-    ax.set_xlabel("wt% A (Carrier / Cottonseed Oil)", fontsize=12)
+    ax.set_xlabel("wt% B (Solvent / Propane)", fontsize=12)
     ax.set_ylabel("wt% C (Solute / Oleic Acid)", fontsize=12)
     ax.set_title(title, fontsize=14)
     ax.legend(fontsize=10)
@@ -172,22 +176,30 @@ def plot_all_equilibrium(eq_model: EquilibriumModel) -> Figure:
     fig, axes = plt.subplots(2, 2, figsize=(16, 14))
     data = eq_model.tie_line_data
 
-    # 1. Right-angle triangle
+    # 1. Right-angle triangle (B-C axes — standard LLE convention)
     ax = axes[0, 0]
-    A_raff_dense = np.linspace(min(data.A_raff), max(data.A_raff), 200)
-    C_raff_dense = [eq_model.C_raff_from_A(a) for a in A_raff_dense]
-    A_ext_dense = np.linspace(min(data.A_ext), max(data.A_ext), 200)
-    C_ext_dense = [eq_model.C_ext_from_A(a) for a in A_ext_dense]
+    B_raff_dense = np.linspace(min(data.B_raff), max(data.B_raff), 200)
+    C_raff_dense = [eq_model.C_raff_from_B(b) for b in B_raff_dense]
+    B_ext_dense = np.linspace(min(data.B_ext), max(data.B_ext), 200)
+    C_ext_dense = [eq_model.C_ext_from_B(b) for b in B_ext_dense]
 
-    ax.plot(A_raff_dense, C_raff_dense, "b-", lw=2, label="Raffinate")
-    ax.plot(A_ext_dense, C_ext_dense, "r-", lw=2, label="Extract")
-    for i in range(len(data.A_raff)):
-        ax.plot([data.A_raff[i], data.A_ext[i]],
+    ax.plot(B_raff_dense, C_raff_dense, "b-", lw=2, label="Raffinate")
+    ax.plot(B_ext_dense, C_ext_dense, "r-", lw=2, label="Extract")
+    for i in range(len(data.B_raff)):
+        ax.plot([data.B_raff[i], data.B_ext[i]],
                 [data.C_raff[i], data.C_ext[i]], "k--", lw=0.7, alpha=0.5)
-    ax.scatter(data.A_raff, data.C_raff, c="blue", s=30, zorder=5)
-    ax.scatter(data.A_ext, data.C_ext, c="red", s=30, zorder=5)
-    ax.set_xlabel("wt% A"); ax.set_ylabel("wt% C")
+    ax.scatter(data.B_raff, data.C_raff, c="blue", s=30, zorder=5)
+    ax.scatter(data.B_ext, data.C_ext, c="red", s=30, zorder=5)
+    if eq_model.plait_point is not None:
+        pp = eq_model.plait_point
+        ax.plot(pp[2], pp[1], "g*", markersize=12, label="Plait pt.")
+    ax.plot([0, 100], [0, 0], "k-", lw=1.5)
+    ax.plot([0, 0], [0, 100], "k-", lw=1.5)
+    ax.plot([100, 0], [0, 100], "k-", lw=1.5)
+    ax.set_xlabel("wt% B (Solvent / Propane)")
+    ax.set_ylabel("wt% C (Solute / Oleic Acid)")
     ax.set_title("Right-Angle Triangle"); ax.legend(fontsize=9)
+    ax.set_xlim(-2, 105); ax.set_ylim(-2, 105); ax.set_aspect("equal")
     ax.grid(True, alpha=0.3)
 
     # 2. N vs X/Y
