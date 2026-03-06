@@ -170,33 +170,36 @@ Mass-Transfer2-Project/
 ├── src/                       # All source code
 │   ├── __init__.py
 │   │
-│   ├── core/                  # Core solver engine (Member 1)
+│   ├── core/                  # Core solver engine
 │   │   ├── __init__.py
 │   │   ├── equilibrium.py     # Equilibrium data fitting & interpolation
 │   │   ├── crosscurrent.py    # Crosscurrent extraction solver
 │   │   └── countercurrent.py  # Countercurrent extraction solver (with reflux)
 │   │
-│   ├── viz/                   # Visualization module (Member 2)
+│   ├── viz/                   # Visualization module
 │   │   ├── __init__.py
 │   │   ├── ternary_plots.py   # Right-angle triangle & distribution diagrams
 │   │   ├── heatmaps.py        # Stage-wise composition & flow rate heatmaps
-│   │   └── surfaces.py        # 3D response surfaces & contour plots
+│   │   ├── surfaces.py        # 3D response surfaces & contour plots
+│   │   └── animations.py      # Animated GIF visualizations (stage stepping, sweeps)
 │   │
-│   ├── ml/                    # Machine learning / surrogate model (Member 3)
+│   ├── ml/                    # Machine learning / surrogate model
 │   │   ├── __init__.py
 │   │   ├── data_generator.py  # Synthetic dataset generation via solver sweeps
 │   │   ├── neural_net.py      # PyTorch ANN model definition, training, evaluation
 │   │   └── optimization.py    # Response surface generation & process optimization
 │   │
-│   └── gui/                   # PyQt6 GUI (shared, integrated by all members)
+│   └── gui/                   # PyQt6 GUI
 │       ├── __init__.py
 │       ├── main_window.py     # Main application window & tab container
 │       ├── data_input_tab.py  # Equilibrium data input / loading
 │       ├── simulation_tab.py  # Crosscurrent & countercurrent simulation controls
 │       ├── heatmap_tab.py     # Heatmap display
-│       └── surrogate_tab.py   # NN training, prediction & response surface display
+│       ├── surrogate_tab.py   # NN training, prediction, response surface & comparison
+│       ├── comparison_tab.py  # Side-by-side mode comparison (cross vs counter)
+│       └── animation_tab.py   # Animated GIF generation, preview & export
 │
-├── tests/                     # Unit tests
+├── tests/                     # Unit tests (53 tests)
 │   ├── test_equilibrium.py
 │   ├── test_crosscurrent.py
 │   ├── test_countercurrent.py
@@ -411,19 +414,85 @@ Store as a Pandas DataFrame / CSV for reproducibility. Target ~5000–10000 data
 
 **Architecture:**
 
-- **ANN (feedforward):** Input(3) → Hidden(64, ReLU) → Hidden(32, ReLU) → Output(1)
+- **ANN (feedforward):** Input(3) → Hidden(64, ReLU, BatchNorm) → Hidden(32, ReLU, BatchNorm) → Output(1)
   - Predicts overall % removal from (n_stages, solvent_amount, feed_composition).
 - **Optional RNN (LSTM/GRU):** For predicting sequential stage-by-stage removal.
   - Input: process parameters → Output: sequence of % removal at each stage.
 
+#### Neural Network Architecture Diagram
+
+```mermaid
+graph LR
+    subgraph "Input Layer"
+        I1["n_stages"]
+        I2["solvent_per_stage"]
+        I3["feed_acid_pct"]
+    end
+
+    subgraph "Hidden Layer 1 (64 neurons)"
+        H1["Linear(3 → 64)"]
+        R1["ReLU"]
+        B1["BatchNorm1d(64)"]
+    end
+
+    subgraph "Hidden Layer 2 (32 neurons)"
+        H2["Linear(64 → 32)"]
+        R2["ReLU"]
+        B2["BatchNorm1d(32)"]
+    end
+
+    subgraph "Output Layer"
+        O["Linear(32 → 1)"]
+        OUT["pct_removal"]
+    end
+
+    I1 & I2 & I3 --> H1 --> R1 --> B1 --> H2 --> R2 --> B2 --> O --> OUT
+```
+
+| Layer | Parameters | Operation |
+|-------|-----------|----------|
+| Input | 3 features | n_stages, solvent_per_stage, feed_acid_pct (StandardScaler normalized) |
+| Hidden 1 | 3×64 + 64 = 256 | Linear → ReLU → BatchNorm1d |
+| Hidden 2 | 64×32 + 32 = 2080 | Linear → ReLU → BatchNorm1d |
+| Output | 32×1 + 1 = 33 | Linear (inverse-scaled to get % removal) |
+| **Total** | **2,369** | |
+
+#### Training Pipeline
+
+```mermaid
+graph TD
+    A["Generated Dataset (N samples)"] --> B["Train/Test Split"]
+    B --> C["Train+Val Set (1 - test_size)"]
+    B --> D["Test Set (test_size) — NEVER seen during training"]
+    C --> E["Train/Val Split"]
+    E --> F["Training Set"]
+    E --> G["Validation Set"]
+
+    F --> H["StandardScaler fit_transform"]
+    G --> I["StandardScaler transform only"]
+    D --> J["StandardScaler transform only"]
+
+    H --> K["Training Loop (Adam, MSE Loss)"]
+    I --> K
+    K --> L{"Val loss improved?"}
+    L -- Yes --> M["Save best state"]
+    L -- No --> N{"Patience exceeded?"}
+    N -- No --> K
+    N -- Yes --> O["Load best model"]
+    M --> K
+    O --> P["Evaluate on Test Set"]
+    J --> P
+    P --> Q["R², MAE, RMSE"]
+```
+
 **Training pipeline:**
 
-1. Load generated dataset, split 80/10/10 (train/val/test).
-2. Normalize inputs (StandardScaler or MinMaxScaler).
-3. Train with Adam optimizer, MSE loss.
-4. Track training/validation loss curves.
-5. Report R², MAE, RMSE on test set.
-6. Save best model checkpoint.
+1. Load generated dataset, split into train/val/test (user-configurable ratios, default 70/15/15).
+2. Normalize inputs and outputs (StandardScaler). Scalers are fit on training data only.
+3. Train with Adam optimizer, MSE loss, batch size 64.
+4. Early stopping with patience (default 20 epochs) monitoring validation loss.
+5. Report R², MAE, RMSE on held-out test set.
+6. Store best model checkpoint (lowest validation loss).
 
 **Prediction vs Actual plots:** Scatter plot of predicted vs actual % removal with R² annotation.
 
@@ -443,9 +512,10 @@ Store as a Pandas DataFrame / CSV for reproducibility. Target ~5000–10000 data
 
 #### 5.1 Main Window (`main_window.py`)
 
-- Tab-based layout with 4 primary tabs.
+- Tab-based layout with **6 primary tabs**.
 - Menu bar: File (Load/Save data), Help (About).
 - Status bar for solver progress.
+- Equilibrium model auto-propagated to all tabs on data load.
 
 #### 5.2 Tab 1: Data Input (`data_input_tab.py`)
 
@@ -458,24 +528,60 @@ Store as a Pandas DataFrame / CSV for reproducibility. Target ~5000–10000 data
 #### 5.3 Tab 2: Simulation (`simulation_tab.py`)
 
 - **Mode selector:** Crosscurrent / Countercurrent (simple) / Countercurrent (with reflux).
-- **Input fields:** Feed composition, feed flow rate, solvent flow rate, number of stages, reflux ratio (if applicable), product specifications (if applicable).
-- **Run button:** Executes the solver, displays results in a table + embedded plots.
-- **Comparison mode:** Run both crosscurrent and countercurrent side-by-side for the same feed, show comparative table/charts.
+- **Input fields:** Feed composition, feed flow rate, solvent flow rate, number of stages, reflux ratio (if applicable), product specifications.
+- **Run button:** Executes solver in a background QThread, displays results in table + embedded plots.
+- Results auto-propagate to Heatmaps, Animation, and Comparison tabs.
 
 #### 5.4 Tab 3: Heatmaps (`heatmap_tab.py`)
 
 - Automatically populated after a simulation run.
 - Toggle between: composition heatmap, flow rate heatmap, % removal heatmap.
 - Stage slider for interactive inspection.
-- Export as image (PNG/SVG).
+- Export as PNG.
 
 #### 5.5 Tab 4: Surrogate Model (`surrogate_tab.py`)
 
 - **Generate Data** button: Runs parameter sweep (with progress bar).
 - **Train Model** button: Trains ANN, shows loss curves live.
+  - **Configurable split ratios:** Test split (0.05–0.50) and Val split (0.05–0.40) spinners.
+  - **"Show Data Split Visuals"** button (4-panel visualization):
+    - Pie chart of train/val/test sizes
+    - Predicted vs Actual scatter on held-out test set (colour-coded by error)
+    - Error histogram with ±MAE lines
+    - Feature-space scatter (solvent vs acid) differentiated by split
 - **Predict** section: Input parameters → instant prediction.
-- **Response Surface** display: Select two variables, adjust the third with a slider, view 3D surface + contour interactively (Plotly widget or Matplotlib 3D).
-- **Optimization:** Button to find optimal point, display result.
+- **Response Surface** display: Select two variables, adjust the third with a slider, view 3D surface interactively.
+- **Optimization:** Button to find optimal operating point.
+- **NN vs Solver Comparison:** Validate the trained ANN against the actual numerical solver.
+  - Scatter mode: Latin Hypercube test grid (independent of training data) — predicted vs actual with R², MAE, RMSE.
+  - Parameter sweep mode: vary one parameter, compare NN and solver outputs on overlaid line chart + error area plot.
+
+#### 5.6 Tab 5: Comparison (`comparison_tab.py`)
+
+- **Side-by-side extraction mode comparison** with identical input parameters.
+- Select any two modes: Crosscurrent, Countercurrent (Simple), Countercurrent (Reflux).
+- Shared input panel (feed conditions, stages, solvent, reflux-specific fields shown conditionally).
+- Two parallel QThread workers solve both modes simultaneously.
+- Three inner result tabs:
+  - **Stage Diagram:** Side-by-side X-Y distribution plots.
+  - **Heatmap:** Toggleable composition / flow rates / % removal / combined views.
+  - **Summary Table:** Two-column metric comparison (removal %, compositions, flow rates, per-stage breakdown).
+
+#### 5.7 Tab 6: Animation (`animation_tab.py`)
+
+- **Generate animated GIF visualizations** of extraction processes.
+- Four animation types:
+
+| Animation | Description |
+|-----------|------------|
+| Stage-by-Stage X-Y Stepping | Stages appear one-by-one on the distribution diagram |
+| Ternary Diagram Build-up | Raffinate/extract points appear on the right-angle triangle per stage |
+| Composition Profile Evolution | Grouped bar chart grows stage-by-stage + cumulative removal line |
+| Parameter Sensitivity Sweep | Varies one parameter, solves for each, shows X-Y + ternary + rolling metrics |
+
+- Built-in GIF player with Play/Pause controls at configurable FPS.
+- Save GIF export button.
+- Uses Matplotlib FuncAnimation + PillowWriter (no ffmpeg required).
 
 ---
 
@@ -574,7 +680,10 @@ All 6 phases are implemented and tested:
 2. The default cottonseed oil equilibrium data loads automatically
 3. Go to **Simulation** tab → select mode → click **Run Simulation**
 4. View results in **Heatmaps** tab
-5. Train a surrogate model in **Surrogate Model** tab
+5. Train a surrogate model in **Surrogate Model** tab → set split ratios → click **Show Data Split Visuals**
+6. Validate the NN: use **NN vs Solver Comparison** (Section 5 in Surrogate tab)
+7. **Compare modes** side-by-side in the **⚖ Comparison** tab
+8. Generate **animated GIF** visualizations in the **🎬 Animation** tab
 
 ---
 
