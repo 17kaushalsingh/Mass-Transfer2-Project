@@ -25,6 +25,7 @@ from .data_input_tab import DataInputTab
 from .simulation_tab import SimulationTab
 from .heatmap_tab import HeatmapTab
 from .surrogate_tab import SurrogateTab
+from .comparison_tab import ComparisonTab
 
 
 DEFAULT_DATA_PATH = Path(__file__).resolve().parent.parent.parent / "data.json"
@@ -81,11 +82,13 @@ class MainWindow(QMainWindow):
         self.sim_tab = SimulationTab(self)
         self.heatmap_tab = HeatmapTab(self)
         self.surrogate_tab = SurrogateTab(self)
+        self.comparison_tab = ComparisonTab(self)
 
         self.tabs.addTab(self.data_tab, "Data Input")
         self.tabs.addTab(self.sim_tab, "Simulation")
         self.tabs.addTab(self.heatmap_tab, "Heatmaps")
         self.tabs.addTab(self.surrogate_tab, "Surrogate Model")
+        self.tabs.addTab(self.comparison_tab, "⚖ Comparison")
 
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
@@ -107,6 +110,7 @@ class MainWindow(QMainWindow):
             self.sim_tab.set_model(self.eq_model)
             self.heatmap_tab.set_model(self.eq_model)
             self.surrogate_tab.set_model(self.eq_model, filepath)
+            self.comparison_tab.set_model(self.eq_model)
             self.statusbar.showMessage(
                 f"Loaded {len(tie_data.A_raff)} tie-lines from {Path(filepath).name}"
             )
