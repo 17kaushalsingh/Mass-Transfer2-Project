@@ -273,10 +273,12 @@ class SimulationTab(QWidget):
         else:
             self._display_reflux_results(result)
 
-        # Notify heatmap tab
+        # Notify heatmap tab and animation tab
         main = self.window()
         if hasattr(main, "heatmap_tab"):
             main.heatmap_tab.set_result(result)
+        if hasattr(main, "animation_tab"):
+            main.animation_tab.set_result(result)
 
     def _on_solver_error(self, msg):
         self.run_btn.setEnabled(True)
