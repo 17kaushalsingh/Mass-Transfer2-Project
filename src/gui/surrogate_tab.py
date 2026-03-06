@@ -81,6 +81,92 @@ class TrainWorker(QThread):
             self.error.emit(str(e))
 
 
+class NNComparisonWorker(QThread):
+    """
+    Runs the actual crosscurrent solver over a test grid so the predictions
+    can be compared against the trained NN surrogate.
+    """
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(object)   # emits a dict with arrays
+    error = pyqtSignal(str)
+
+    def __init__(self, eq_model, mode: str, sweep_var: str,
+                 sweep_range: tuple, fixed_vals: dict, n_pts: int):
+        super().__init__()
+        self.eq_model = eq_model
+        self.mode = mode            # 'scatter' or 'sweep'
+        self.sweep_var = sweep_var
+        self.sweep_range = sweep_range
+        self.fixed_vals = fixed_vals
+        self.n_pts = n_pts
+
+    def run(self):
+        import warnings
+        import numpy as np
+        from ..core.crosscurrent import solve_crosscurrent
+
+        try:
+            eq = self.eq_model
+
+            if self.mode == 'sweep':
+                xs = np.linspace(self.sweep_range[0], self.sweep_range[1], self.n_pts)
+                y_solver = []
+                for i, x in enumerate(xs):
+                    self.progress.emit(i + 1, self.n_pts)
+                    params = dict(self.fixed_vals)
+                    params[self.sweep_var] = float(x)
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter('ignore')
+                            n_stg = max(1, int(round(params.get('n_stages', 5))))
+                            sol = solve_crosscurrent(
+                                feed_A=100.0 - params['feed_acid_pct'],
+                                feed_C=params['feed_acid_pct'],
+                                feed_flow=100.0,
+                                solvent_per_stage=params['solvent_per_stage'],
+                                n_stages=n_stg,
+                                eq_model=eq,
+                            )
+                            y_solver.append(sol.total_pct_removal)
+                    except Exception:
+                        y_solver.append(float('nan'))
+                self.finished.emit({'mode': 'sweep', 'xs': xs, 'y_solver': np.array(y_solver),
+                                    'sweep_var': self.sweep_var})
+
+            else:  # scatter – generate a fresh test grid
+                import pandas as pd
+                from scipy.stats.qmc import LatinHypercube
+                sampler = LatinHypercube(d=3, seed=99)
+                samples = sampler.random(n=self.n_pts)
+                n_stages_arr = np.round(samples[:, 0] * 14 + 1).astype(int)
+                solvent_arr  = samples[:, 1] * 4900 + 100
+                acid_arr     = samples[:, 2] * 40 + 5
+
+                X_vals, y_solver = [], []
+                for i in range(self.n_pts):
+                    self.progress.emit(i + 1, self.n_pts)
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter('ignore')
+                            sol = solve_crosscurrent(
+                                feed_A=100.0 - acid_arr[i],
+                                feed_C=acid_arr[i],
+                                feed_flow=100.0,
+                                solvent_per_stage=float(solvent_arr[i]),
+                                n_stages=int(n_stages_arr[i]),
+                                eq_model=eq,
+                            )
+                            X_vals.append([n_stages_arr[i], solvent_arr[i], acid_arr[i]])
+                            y_solver.append(sol.total_pct_removal)
+                    except Exception:
+                        continue
+                self.finished.emit({'mode': 'scatter',
+                                    'X': np.array(X_vals),
+                                    'y_solver': np.array(y_solver)})
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 # ---------------------------------------------------------------------------
 # Surrogate Tab
 # ---------------------------------------------------------------------------
@@ -194,7 +280,64 @@ class SurrogateTab(QWidget):
         opt_layout.addRow(self.opt_result)
 
         left.addWidget(opt_group)
+
+        # ------ 5. Compare NN vs Solver ------
+        cmp_group = QGroupBox("5. Compare NN vs Solver")
+        cmp_layout = QFormLayout(cmp_group)
+
+        self.cmp_type_combo = QComboBox()
+        self.cmp_type_combo.addItems(["Scatter Plot (random grid)", "Parameter Sweep"])
+        self.cmp_type_combo.currentIndexChanged.connect(self._on_cmp_type_changed)
+        cmp_layout.addRow("Mode:", self.cmp_type_combo)
+
+        self.cmp_n_pts_spin = QSpinBox()
+        self.cmp_n_pts_spin.setRange(10, 500); self.cmp_n_pts_spin.setValue(80)
+        cmp_layout.addRow("Test points:", self.cmp_n_pts_spin)
+
+        # Sweep controls (shown only in sweep mode)
+        self.cmp_sweep_var_combo = QComboBox()
+        self.cmp_sweep_var_combo.addItems(["n_stages", "solvent_per_stage", "feed_acid_pct"])
+        self.cmp_sweep_var_label = QLabel("Sweep variable:")
+        cmp_layout.addRow(self.cmp_sweep_var_label, self.cmp_sweep_var_combo)
+
+        self.cmp_fixed_stages_spin = QSpinBox()
+        self.cmp_fixed_stages_spin.setRange(1, 20); self.cmp_fixed_stages_spin.setValue(5)
+        self.cmp_fixed_stages_label = QLabel("Fixed stages:")
+        cmp_layout.addRow(self.cmp_fixed_stages_label, self.cmp_fixed_stages_spin)
+
+        self.cmp_fixed_solvent_spin = QDoubleSpinBox()
+        self.cmp_fixed_solvent_spin.setRange(1, 50000); self.cmp_fixed_solvent_spin.setValue(1000)
+        self.cmp_fixed_solvent_label = QLabel("Fixed solvent (kg):")
+        cmp_layout.addRow(self.cmp_fixed_solvent_label, self.cmp_fixed_solvent_spin)
+
+        self.cmp_fixed_acid_spin = QDoubleSpinBox()
+        self.cmp_fixed_acid_spin.setRange(1, 50); self.cmp_fixed_acid_spin.setValue(25)
+        self.cmp_fixed_acid_label = QLabel("Fixed feed acid %:")
+        cmp_layout.addRow(self.cmp_fixed_acid_label, self.cmp_fixed_acid_spin)
+
+        self.cmp_btn = QPushButton("Run Comparison")
+        self.cmp_btn.clicked.connect(self._run_nn_comparison)
+        cmp_layout.addRow(self.cmp_btn)
+
+        self.cmp_progress = QProgressBar()
+        cmp_layout.addRow(self.cmp_progress)
+
+        self.cmp_info = QLabel("")
+        self.cmp_info.setWordWrap(True)
+        cmp_layout.addRow(self.cmp_info)
+
+        left.addWidget(cmp_group)
         left.addStretch()
+
+        # Hide sweep-only widgets initially
+        self._sweep_widgets = [
+            (self.cmp_sweep_var_label, self.cmp_sweep_var_combo),
+            (self.cmp_fixed_stages_label, self.cmp_fixed_stages_spin),
+            (self.cmp_fixed_solvent_label, self.cmp_fixed_solvent_spin),
+            (self.cmp_fixed_acid_label, self.cmp_fixed_acid_spin),
+        ]
+        for lbl, wid in self._sweep_widgets:
+            lbl.hide(); wid.hide()
 
         main_layout.addLayout(left, stretch=1)
 
@@ -351,6 +494,209 @@ class SurrogateTab(QWidget):
             f"Predicted removal: {result['predicted_removal']:.2f}%<br>"
             f"Total solvent: {result['total_solvent']:.0f} kg"
         )
+
+    # ------------------------------------------------------------------
+    # NN vs Solver comparison
+    # ------------------------------------------------------------------
+
+    def _on_cmp_type_changed(self, idx):
+        is_sweep = (idx == 1)
+        for lbl, wid in self._sweep_widgets:
+            if is_sweep:
+                lbl.show(); wid.show()
+            else:
+                lbl.hide(); wid.hide()
+
+    def _run_nn_comparison(self):
+        if self.training_result is None:
+            QMessageBox.warning(self, "No Model", "Train a surrogate model first.")
+            return
+        if self.eq_model is None:
+            QMessageBox.warning(self, "No Data", "Load equilibrium data first.")
+            return
+
+        mode = 'sweep' if self.cmp_type_combo.currentIndex() == 1 else 'scatter'
+        sweep_var = self.cmp_sweep_var_combo.currentText()
+        n_pts = self.cmp_n_pts_spin.value()
+
+        sweep_ranges = {
+            'n_stages': (1, 15),
+            'solvent_per_stage': (100, 5000),
+            'feed_acid_pct': (5, 45),
+        }
+        fixed_vals = {
+            'n_stages': float(self.cmp_fixed_stages_spin.value()),
+            'solvent_per_stage': self.cmp_fixed_solvent_spin.value(),
+            'feed_acid_pct': self.cmp_fixed_acid_spin.value(),
+        }
+
+        self.cmp_btn.setEnabled(False)
+        self.cmp_info.setText("Running solver…")
+        self.cmp_progress.setValue(0)
+
+        self._cmp_worker = NNComparisonWorker(
+            eq_model=self.eq_model,
+            mode=mode,
+            sweep_var=sweep_var,
+            sweep_range=sweep_ranges[sweep_var],
+            fixed_vals=fixed_vals,
+            n_pts=n_pts,
+        )
+        self._cmp_worker.progress.connect(self._on_comparison_progress)
+        self._cmp_worker.finished.connect(self._on_comparison_done)
+        self._cmp_worker.error.connect(self._on_comparison_error)
+        self._cmp_worker.start()
+
+    def _on_comparison_progress(self, current, total):
+        self.cmp_progress.setMaximum(total)
+        self.cmp_progress.setValue(current)
+
+    def _on_comparison_done(self, data: dict):
+        self.cmp_btn.setEnabled(True)
+        if data['mode'] == 'scatter':
+            self._plot_scatter_comparison(data)
+        else:
+            self._plot_sweep_comparison(data)
+
+    def _on_comparison_error(self, msg: str):
+        self.cmp_btn.setEnabled(True)
+        self.cmp_info.setText("Error!")
+        QMessageBox.critical(self, "Comparison Error", msg)
+
+    def _plot_scatter_comparison(self, data: dict):
+        """Scatter plot: NN predicted vs actual solver for random test points."""
+        import numpy as np
+        from ..ml.neural_net import predict
+
+        X = data['X']                    # (N, 3)  [n_stages, solvent, acid]
+        y_solver = data['y_solver']      # (N,)
+
+        tr = self.training_result
+        y_nn = np.array([
+            predict(tr.model, tr.scaler_X, tr.scaler_y,
+                    n_stages=X[i, 0], solvent=X[i, 1], feed_comp=X[i, 2])
+            for i in range(len(X))
+        ])
+
+        # Metrics
+        valid = ~np.isnan(y_solver) & ~np.isnan(y_nn)
+        y_s, y_n = y_solver[valid], y_nn[valid]
+        ss_res = np.sum((y_s - y_n) ** 2)
+        ss_tot = np.sum((y_s - np.mean(y_s)) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float('nan')
+        mae  = float(np.mean(np.abs(y_s - y_n)))
+        rmse = float(np.sqrt(np.mean((y_s - y_n) ** 2)))
+        max_err = float(np.max(np.abs(y_s - y_n)))
+
+        self.cmp_info.setText(
+            f"<b>Scatter vs Solver</b> — {valid.sum()} points<br>"
+            f"R² = {r2:.4f} &nbsp; MAE = {mae:.2f}% &nbsp; "
+            f"RMSE = {rmse:.2f}% &nbsp; Max err = {max_err:.2f}%"
+        )
+
+        self.canvas.figure.clear()
+        axes = self.canvas.figure.subplots(1, 2)
+
+        # Left: scatter predicted vs actual
+        ax = axes[0]
+        sc = ax.scatter(y_s, y_n, c=np.abs(y_s - y_n), cmap='RdYlGn_r',
+                        s=40, alpha=0.75, edgecolors='none')
+        self.canvas.figure.colorbar(sc, ax=ax, label='|Error| (%)', shrink=0.8)
+        lims = [min(y_s.min(), y_n.min()) - 2, max(y_s.max(), y_n.max()) + 2]
+        ax.plot(lims, lims, 'k--', lw=1.5, label='Perfect fit (y = x)')
+        ax.set_xlim(lims); ax.set_ylim(lims)
+        ax.set_xlabel('Actual Solver (% removal)', fontsize=11)
+        ax.set_ylabel('NN Predicted (% removal)', fontsize=11)
+        ax.set_title(f'NN vs Solver — Scatter Plot\nR²={r2:.4f}  MAE={mae:.2f}%  RMSE={rmse:.2f}%', fontsize=11)
+        ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
+
+        # Right: histogram of errors
+        ax2 = axes[1]
+        errors = y_n - y_s
+        ax2.hist(errors, bins=20, color='steelblue', edgecolor='white', alpha=0.85)
+        ax2.axvline(0, color='red', lw=1.5, label='Zero error')
+        ax2.axvline(mae,  color='orange', lw=1.5, ls='--', label=f'MAE={mae:.2f}%')
+        ax2.axvline(-mae, color='orange', lw=1.5, ls='--')
+        ax2.set_xlabel('NN Prediction Error (%)', fontsize=11)
+        ax2.set_ylabel('Count', fontsize=11)
+        ax2.set_title('Distribution of Prediction Errors', fontsize=11)
+        ax2.legend(fontsize=9); ax2.grid(True, alpha=0.3)
+
+        self.canvas.figure.tight_layout()
+        self.canvas.draw()
+
+    def _plot_sweep_comparison(self, data: dict):
+        """Line chart: NN vs solver as one parameter varies."""
+        import numpy as np
+        from ..ml.neural_net import predict
+
+        xs = data['xs']
+        y_solver = data['y_solver']
+        sweep_var = data['sweep_var']
+
+        fixed_vals = {
+            'n_stages': float(self.cmp_fixed_stages_spin.value()),
+            'solvent_per_stage': self.cmp_fixed_solvent_spin.value(),
+            'feed_acid_pct': self.cmp_fixed_acid_spin.value(),
+        }
+
+        tr = self.training_result
+        y_nn = np.array([
+            predict(
+                tr.model, tr.scaler_X, tr.scaler_y,
+                n_stages=xs[i] if sweep_var == 'n_stages' else fixed_vals['n_stages'],
+                solvent=xs[i] if sweep_var == 'solvent_per_stage' else fixed_vals['solvent_per_stage'],
+                feed_comp=xs[i] if sweep_var == 'feed_acid_pct' else fixed_vals['feed_acid_pct'],
+            )
+            for i in range(len(xs))
+        ])
+
+        valid = ~np.isnan(y_solver)
+        errors = np.abs(y_nn[valid] - y_solver[valid])
+        mae = float(np.mean(errors)) if valid.any() else float('nan')
+        max_err = float(np.max(errors)) if valid.any() else float('nan')
+
+        var_labels = {
+            'n_stages': 'Number of Stages',
+            'solvent_per_stage': 'Solvent per Stage (kg)',
+            'feed_acid_pct': 'Feed Acid (%)',
+        }
+        fixed_desc = ", ".join(
+            f"{var_labels[k]}={v:.1f}" for k, v in fixed_vals.items() if k != sweep_var
+        )
+
+        self.cmp_info.setText(
+            f"<b>Sweep: {var_labels[sweep_var]}</b>  |  {fixed_desc}<br>"
+            f"MAE = {mae:.2f}% &nbsp; Max error = {max_err:.2f}%"
+        )
+
+        self.canvas.figure.clear()
+        axes = self.canvas.figure.subplots(2, 1, sharex=True,
+                                            gridspec_kw={'height_ratios': [3, 1]})
+
+        # Top: NN vs solver lines
+        ax = axes[0]
+        ax.plot(xs[valid], y_solver[valid], 'b-o', ms=4, lw=2, label='Actual Solver')
+        ax.plot(xs, y_nn, 'r--s', ms=4, lw=2, label='NN Surrogate')
+        ax.set_ylabel('% Removal', fontsize=11)
+        ax.set_title(
+            f'NN Surrogate vs Actual Solver\nSweep: {var_labels[sweep_var]}  |  {fixed_desc}',
+            fontsize=11
+        )
+        ax.legend(fontsize=10); ax.grid(True, alpha=0.3)
+        ax.set_ylim(0, 105)
+
+        # Bottom: absolute error
+        ax2 = axes[1]
+        ax2.fill_between(xs[valid], errors, alpha=0.4, color='orange', label='|Error|')
+        ax2.plot(xs[valid], errors, 'o-', color='darkorange', ms=3, lw=1.5)
+        ax2.axhline(mae, color='red', lw=1.5, ls='--', label=f'MAE={mae:.2f}%')
+        ax2.set_xlabel(var_labels[sweep_var], fontsize=11)
+        ax2.set_ylabel('|Error| (%)', fontsize=11)
+        ax2.legend(fontsize=9); ax2.grid(True, alpha=0.3)
+
+        self.canvas.figure.tight_layout()
+        self.canvas.draw()
 
     def _plot_surface(self):
         if self.training_result is None:
