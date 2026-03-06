@@ -61,6 +61,28 @@ class HeatmapTab(QWidget):
 
         for btn in [self.comp_btn, self.flow_btn, self.removal_btn, self.combined_btn]:
             ctrl_layout.addWidget(btn)
+
+        # Additional visualizations
+        ctrl_layout.addWidget(QLabel("  │"))  # visual separator
+
+        self.profile_btn = QPushButton("📈 Profiles")
+        self.profile_btn.setCheckable(True)
+        self.profile_btn.setToolTip("Concentration & flow rate line charts vs stage")
+        self.profile_btn.clicked.connect(lambda: self._show_profiles())
+        ctrl_layout.addWidget(self.profile_btn)
+
+        self.raff_ext_btn = QPushButton("⚖ Raff vs Ext")
+        self.raff_ext_btn.setCheckable(True)
+        self.raff_ext_btn.setToolTip("Raffinate vs Extract compositions at each stage")
+        self.raff_ext_btn.clicked.connect(lambda: self._show_raff_vs_ext())
+        ctrl_layout.addWidget(self.raff_ext_btn)
+
+        self.removal_curve_btn = QPushButton("📉 Removal Curve")
+        self.removal_curve_btn.setCheckable(True)
+        self.removal_curve_btn.setToolTip("Per-stage and cumulative % removal line chart")
+        self.removal_curve_btn.clicked.connect(lambda: self._show_removal_curve())
+        ctrl_layout.addWidget(self.removal_curve_btn)
+
         ctrl_layout.addStretch()
         ctrl_layout.addWidget(self.export_btn)
 
@@ -87,7 +109,8 @@ class HeatmapTab(QWidget):
             return
 
         # Update button states
-        for btn in [self.comp_btn, self.flow_btn, self.removal_btn, self.combined_btn]:
+        for btn in [self.comp_btn, self.flow_btn, self.removal_btn, self.combined_btn,
+                    self.profile_btn, self.raff_ext_btn, self.removal_curve_btn]:
             btn.setChecked(False)
 
         if hmap_type == "composition":
@@ -161,3 +184,165 @@ class HeatmapTab(QWidget):
         if filepath:
             self.canvas.figure.savefig(filepath, dpi=200, bbox_inches="tight")
             QMessageBox.information(self, "Exported", f"Saved to {filepath}")
+
+    # ------------------------------------------------------------------
+    # Additional visualizations
+    # ------------------------------------------------------------------
+
+    def _uncheck_all(self):
+        for btn in [self.comp_btn, self.flow_btn, self.removal_btn, self.combined_btn,
+                    self.profile_btn, self.raff_ext_btn, self.removal_curve_btn]:
+            btn.setChecked(False)
+
+    def _show_profiles(self):
+        """Line charts: concentration and flow rate profiles vs stage."""
+        if self.result is None:
+            QMessageBox.information(self, "No Data", "Run a simulation first.")
+            return
+
+        from ..core.crosscurrent import CrosscurrentResult
+        if not isinstance(self.result, CrosscurrentResult):
+            QMessageBox.information(self, "Info",
+                "Profile charts are currently available for crosscurrent results.")
+            return
+
+        self._uncheck_all()
+        self.profile_btn.setChecked(True)
+
+        import numpy as np
+        stages = self.result.stages
+        x = [s.stage_number for s in stages]
+
+        self.canvas.figure.clear()
+        fig = self.canvas.figure
+        ax1, ax2 = fig.subplots(1, 2)
+
+        # Left: concentration profiles
+        ax1.plot(x, [s.A_raff for s in stages], 'o-', lw=2, ms=6, color='#4e79a7', label='A (Carrier)')
+        ax1.plot(x, [s.C_raff for s in stages], 's-', lw=2, ms=6, color='#e15759', label='C (Solute)')
+        ax1.plot(x, [s.B_raff for s in stages], '^-', lw=2, ms=6, color='#76b7b2', label='B (Solvent)')
+        ax1.set_xlabel('Stage Number', fontsize=12)
+        ax1.set_ylabel('Raffinate Composition (wt%)', fontsize=12)
+        ax1.set_title('Concentration Profile — Raffinate', fontsize=13)
+        ax1.legend(fontsize=10)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_xticks(x)
+
+        # Right: flow rate profiles
+        ax2.plot(x, [s.R_flow for s in stages], 'o-', lw=2, ms=6, color='#4e79a7', label='Raffinate R')
+        ax2.plot(x, [s.E_flow for s in stages], 's-', lw=2, ms=6, color='#e15759', label='Extract E')
+        ax2.set_xlabel('Stage Number', fontsize=12)
+        ax2.set_ylabel('Flow Rate (kg)', fontsize=12)
+        ax2.set_title('Flow Rate Profile', fontsize=13)
+        ax2.legend(fontsize=10)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_xticks(x)
+
+        fig.suptitle('Concentration & Flow Rate Profiles', fontsize=14, y=1.01)
+        fig.tight_layout()
+        self.canvas.draw()
+
+    def _show_raff_vs_ext(self):
+        """Grouped bar chart: raffinate vs extract compositions at each stage."""
+        if self.result is None:
+            QMessageBox.information(self, "No Data", "Run a simulation first.")
+            return
+
+        from ..core.crosscurrent import CrosscurrentResult
+        if not isinstance(self.result, CrosscurrentResult):
+            QMessageBox.information(self, "Info",
+                "Raffinate vs Extract chart is currently available for crosscurrent results.")
+            return
+
+        self._uncheck_all()
+        self.raff_ext_btn.setChecked(True)
+
+        import numpy as np
+        stages = self.result.stages
+        n = len(stages)
+        x = np.arange(n)
+        w = 0.13  # bar width
+
+        self.canvas.figure.clear()
+        fig = self.canvas.figure
+        ax = fig.add_subplot(111)
+
+        # Raffinate bars (solid)
+        ax.bar(x - 2.5*w, [s.A_raff for s in stages], w, color='#4e79a7', label='A raff')
+        ax.bar(x - 1.5*w, [s.C_raff for s in stages], w, color='#e15759', label='C raff')
+        ax.bar(x - 0.5*w, [s.B_raff for s in stages], w, color='#76b7b2', label='B raff')
+
+        # Extract bars (hatched)
+        ax.bar(x + 0.5*w, [s.A_ext for s in stages], w, color='#4e79a7', alpha=0.5,
+               hatch='//', label='A ext', edgecolor='#4e79a7')
+        ax.bar(x + 1.5*w, [s.C_ext for s in stages], w, color='#e15759', alpha=0.5,
+               hatch='//', label='C ext', edgecolor='#e15759')
+        ax.bar(x + 2.5*w, [s.B_ext for s in stages], w, color='#76b7b2', alpha=0.5,
+               hatch='//', label='B ext', edgecolor='#76b7b2')
+
+        ax.set_xlabel('Stage Number', fontsize=12)
+        ax.set_ylabel('Composition (wt%)', fontsize=12)
+        ax.set_title('Raffinate vs Extract Compositions at Each Stage', fontsize=13)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f'S{s.stage_number}' for s in stages])
+        ax.legend(fontsize=9, ncol=2, loc='upper right')
+        ax.grid(True, alpha=0.3, axis='y')
+
+        fig.tight_layout()
+        self.canvas.draw()
+
+    def _show_removal_curve(self):
+        """Per-stage and cumulative % removal line chart."""
+        if self.result is None:
+            QMessageBox.information(self, "No Data", "Run a simulation first.")
+            return
+
+        from ..core.crosscurrent import CrosscurrentResult
+        if not isinstance(self.result, CrosscurrentResult):
+            QMessageBox.information(self, "Info",
+                "Removal curve is currently available for crosscurrent results.")
+            return
+
+        self._uncheck_all()
+        self.removal_curve_btn.setChecked(True)
+
+        stages = self.result.stages
+        x = [s.stage_number for s in stages]
+        per_stage = [s.pct_removal_stage for s in stages]
+        cumulative = [s.pct_removal_cumul for s in stages]
+
+        self.canvas.figure.clear()
+        fig = self.canvas.figure
+        ax1 = fig.add_subplot(111)
+
+        # Per-stage removal as bars
+        bars = ax1.bar(x, per_stage, color='#59a14f', alpha=0.7, label='Per-stage removal',
+                       edgecolor='white', zorder=2)
+        for bar, val in zip(bars, per_stage):
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.3,
+                     f'{val:.1f}%', ha='center', va='bottom', fontsize=9, color='#59a14f')
+
+        # Cumulative on secondary axis
+        ax2 = ax1.twinx()
+        ax2.plot(x, cumulative, 'o-', lw=2.5, ms=8, color='#e15759',
+                 label='Cumulative removal', zorder=3)
+        for xi, yi in zip(x, cumulative):
+            ax2.annotate(f'{yi:.1f}%', (xi, yi), textcoords='offset points',
+                         xytext=(0, 10), ha='center', fontsize=9, color='#e15759',
+                         fontweight='bold')
+
+        ax1.set_xlabel('Stage Number', fontsize=12)
+        ax1.set_ylabel('Per-Stage Removal (%)', fontsize=12, color='#59a14f')
+        ax2.set_ylabel('Cumulative Removal (%)', fontsize=12, color='#e15759')
+        ax1.set_title('Solute Removal Efficiency Curve', fontsize=13)
+        ax1.set_xticks(x)
+        ax2.set_ylim(0, 105)
+        ax1.grid(True, alpha=0.3)
+
+        # Combined legend
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=10, loc='center right')
+
+        fig.tight_layout()
+        self.canvas.draw()
