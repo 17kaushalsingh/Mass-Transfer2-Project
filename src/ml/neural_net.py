@@ -80,6 +80,18 @@ class TrainingResult:
     test_mae: float = 0.0
     test_rmse: float = 0.0
     best_epoch: int = 0
+    # Split data arrays (unscaled, original units) for visualization
+    X_train: Optional[np.ndarray] = None
+    X_val: Optional[np.ndarray] = None
+    X_test: Optional[np.ndarray] = None
+    y_train: Optional[np.ndarray] = None
+    y_val: Optional[np.ndarray] = None
+    y_test: Optional[np.ndarray] = None
+    y_pred_test: Optional[np.ndarray] = None
+    n_total: int = 0
+    n_train: int = 0
+    n_val: int = 0
+    n_test: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +247,18 @@ def train_model(
         test_mae=mae,
         test_rmse=rmse,
         best_epoch=best_epoch,
+        # Store split data (unscaled) for visualization
+        X_train=X_train,
+        X_val=X_val,
+        X_test=X_test,
+        y_train=y_train,
+        y_val=y_val,
+        y_test=y_test,
+        y_pred_test=y_pred,
+        n_total=len(X),
+        n_train=len(X_train),
+        n_val=len(X_val),
+        n_test=len(X_test),
     )
 
 

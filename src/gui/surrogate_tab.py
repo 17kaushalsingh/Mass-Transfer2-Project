@@ -223,9 +223,26 @@ class SurrogateTab(QWidget):
         self.lr_spin.setDecimals(4); self.lr_spin.setSingleStep(0.0001)
         train_layout.addRow("Learning rate:", self.lr_spin)
 
+        self.test_size_spin = QDoubleSpinBox()
+        self.test_size_spin.setRange(0.05, 0.50); self.test_size_spin.setValue(0.15)
+        self.test_size_spin.setDecimals(2); self.test_size_spin.setSingleStep(0.05)
+        self.test_size_spin.setToolTip("Fraction of data held out for testing (not used in training or validation)")
+        train_layout.addRow("Test split:", self.test_size_spin)
+
+        self.val_size_spin = QDoubleSpinBox()
+        self.val_size_spin.setRange(0.05, 0.40); self.val_size_spin.setValue(0.15)
+        self.val_size_spin.setDecimals(2); self.val_size_spin.setSingleStep(0.05)
+        self.val_size_spin.setToolTip("Fraction of data used for validation (early stopping)")
+        train_layout.addRow("Val split:", self.val_size_spin)
+
         self.train_btn = QPushButton("Train Model")
         self.train_btn.clicked.connect(self._train_model)
         train_layout.addRow(self.train_btn)
+
+        self.split_viz_btn = QPushButton("Show Data Split Visuals")
+        self.split_viz_btn.setEnabled(False)
+        self.split_viz_btn.clicked.connect(self._plot_data_split)
+        train_layout.addRow(self.split_viz_btn)
 
         self.train_progress = QProgressBar()
         train_layout.addRow(self.train_progress)
@@ -412,6 +429,8 @@ class SurrogateTab(QWidget):
         config = TrainingConfig(
             epochs=self.epochs_spin.value(),
             learning_rate=self.lr_spin.value(),
+            test_size=self.test_size_spin.value(),
+            val_size=self.val_size_spin.value(),
         )
 
         self.train_btn.setEnabled(False)
@@ -434,10 +453,13 @@ class SurrogateTab(QWidget):
 
     def _on_train_done(self, result):
         self.train_btn.setEnabled(True)
+        self.split_viz_btn.setEnabled(True)
         self.training_result = result
         self.train_info.setText(
             f"<b>Done!</b> R²={result.test_r_squared:.4f}, "
-            f"MAE={result.test_mae:.2f}%, RMSE={result.test_rmse:.2f}%"
+            f"MAE={result.test_mae:.2f}%, RMSE={result.test_rmse:.2f}%<br>"
+            f"Split: {result.n_train} train / {result.n_val} val / {result.n_test} test "
+            f"(of {result.n_total} total)"
         )
         self._update_loss_plot()
 
@@ -459,6 +481,84 @@ class SurrogateTab(QWidget):
         if len(self.training_result.train_losses) > 10:
             ax.set_yscale("log")
         self.canvas.figure.tight_layout()
+        self.canvas.draw()
+
+    def _plot_data_split(self):
+        """Visualize the train/val/test split and test-set predictions."""
+        tr = self.training_result
+        if tr is None or tr.X_test is None:
+            QMessageBox.warning(self, "No Data", "Train a model first.")
+            return
+
+        import numpy as np
+
+        self.canvas.figure.clear()
+        fig = self.canvas.figure
+        axes = fig.subplots(2, 2)
+
+        # ---- 1. Pie chart of split sizes ----
+        ax = axes[0, 0]
+        sizes = [tr.n_train, tr.n_val, tr.n_test]
+        labels = [f"Train\n({tr.n_train})", f"Val\n({tr.n_val})", f"Test\n({tr.n_test})"]
+        colors = ["#4e79a7", "#f28e2b", "#e15759"]
+        wedges, texts, autotexts = ax.pie(
+            sizes, labels=labels, colors=colors, autopct="%1.1f%%",
+            startangle=90, textprops={"fontsize": 9},
+        )
+        ax.set_title(f"Data Split ({tr.n_total} total)", fontsize=11)
+
+        # ---- 2. Predicted vs Actual on TEST set ----
+        ax2 = axes[0, 1]
+        y_test = tr.y_test.ravel()
+        y_pred = tr.y_pred_test.ravel()
+        errors = np.abs(y_test - y_pred)
+
+        sc = ax2.scatter(y_test, y_pred, c=errors, cmap="RdYlGn_r",
+                         s=30, alpha=0.7, edgecolors="none")
+        fig.colorbar(sc, ax=ax2, label="|Error| (%)", shrink=0.8)
+        lims = [min(y_test.min(), y_pred.min()) - 2,
+                max(y_test.max(), y_pred.max()) + 2]
+        ax2.plot(lims, lims, "k--", lw=1.5, label="Perfect fit")
+        ax2.set_xlim(lims); ax2.set_ylim(lims)
+        ax2.set_xlabel("Actual (% removal)", fontsize=10)
+        ax2.set_ylabel("Predicted (% removal)", fontsize=10)
+        ax2.set_title(
+            f"Test Set: Predicted vs Actual\n"
+            f"R²={tr.test_r_squared:.4f}  MAE={tr.test_mae:.2f}%",
+            fontsize=10,
+        )
+        ax2.legend(fontsize=8); ax2.grid(True, alpha=0.3)
+
+        # ---- 3. Error histogram ----
+        ax3 = axes[1, 0]
+        errs = y_pred - y_test
+        ax3.hist(errs, bins=25, color="steelblue", edgecolor="white", alpha=0.85)
+        ax3.axvline(0, color="red", lw=1.5, label="Zero")
+        mae = tr.test_mae
+        ax3.axvline(mae, color="orange", ls="--", lw=1.5, label=f"+MAE ({mae:.2f}%)")
+        ax3.axvline(-mae, color="orange", ls="--", lw=1.5, label=f"-MAE")
+        ax3.set_xlabel("Prediction Error (%)", fontsize=10)
+        ax3.set_ylabel("Count", fontsize=10)
+        ax3.set_title("Test Set Error Distribution", fontsize=10)
+        ax3.legend(fontsize=8); ax3.grid(True, alpha=0.3)
+
+        # ---- 4. Feature scatter (train vs val vs test) ----
+        ax4 = axes[1, 1]
+        feat_names = ["n_stages", "solvent/stage", "feed_acid%"]
+        # Plot solvent vs feed_acid (features 1 & 2) coloured by split
+        ax4.scatter(tr.X_train[:, 1], tr.X_train[:, 2], c="#4e79a7",
+                    s=8, alpha=0.4, label=f"Train ({tr.n_train})")
+        ax4.scatter(tr.X_val[:, 1], tr.X_val[:, 2], c="#f28e2b",
+                    s=15, alpha=0.6, label=f"Val ({tr.n_val})")
+        ax4.scatter(tr.X_test[:, 1], tr.X_test[:, 2], c="#e15759",
+                    s=20, alpha=0.7, label=f"Test ({tr.n_test})", marker="x")
+        ax4.set_xlabel("Solvent per Stage (kg)", fontsize=10)
+        ax4.set_ylabel("Feed Acid (%)", fontsize=10)
+        ax4.set_title("Feature Space: Train / Val / Test", fontsize=10)
+        ax4.legend(fontsize=8, markerscale=2); ax4.grid(True, alpha=0.3)
+
+        fig.suptitle("Train-Test Data Split Visualization", fontsize=13, y=1.01)
+        fig.tight_layout()
         self.canvas.draw()
 
     def _predict(self):
