@@ -33,6 +33,7 @@ from matplotlib.figure import Figure
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
+from .animation_tab import AnimationTab
 from .ui_helpers import animate_widget_in, draw_empty_figure
 
 
@@ -190,6 +191,7 @@ class SurrogateTab(QWidget):
         self.data_path: str = DEFAULT_DATA_PATH
         self.dataset = None
         self.training_result = None
+        self.animation_tab: Optional[AnimationTab] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -412,6 +414,25 @@ class SurrogateTab(QWidget):
         compare_layout_wrap.addWidget(cmp_group)
         compare_layout_wrap.addStretch()
         self.workflow_tabs.addTab(compare_page, "Compare NN")
+
+        # Animation tab
+        animation_page = QWidget()
+        animation_layout_wrap = QVBoxLayout(animation_page)
+        animation_layout_wrap.setContentsMargins(0, 0, 0, 0)
+        animation_hint = QLabel(
+            "Animations here use the current Predict input values as the operating point "
+            "for a fresh crosscurrent solver run."
+        )
+        animation_hint.setWordWrap(True)
+        animation_hint.setProperty("class", "helperText")
+        animation_layout_wrap.addWidget(animation_hint)
+        self.animation_tab = AnimationTab(
+            self,
+            show_source_controls=False,
+            solver_factory=self._build_animation_solver,
+        )
+        animation_layout_wrap.addWidget(self.animation_tab)
+        self.workflow_tabs.addTab(animation_page, "Animation")
         left.addStretch()
 
         # Hide sweep-only widgets initially
@@ -462,7 +483,23 @@ class SurrogateTab(QWidget):
     def set_model(self, eq_model: EquilibriumModel, data_path: str = DEFAULT_DATA_PATH):
         self.eq_model = eq_model
         self.data_path = data_path
+        if self.animation_tab is not None:
+            self.animation_tab.set_model(eq_model)
         self.gen_info.setText("Equilibrium model ready. Generate data to start the surrogate workflow.")
+
+    def _build_animation_solver(self):
+        if self.eq_model is None:
+            raise ValueError("Load equilibrium data first.")
+        from ..core.crosscurrent import solve_crosscurrent
+        kwargs = dict(
+            feed_A=100.0 - self.pred_acid.value(),
+            feed_C=self.pred_acid.value(),
+            feed_flow=100.0,
+            solvent_per_stage=self.pred_solvent.value(),
+            n_stages=self.pred_stages.value(),
+            eq_model=self.eq_model,
+        )
+        return solve_crosscurrent, kwargs
 
     def _draw_empty_state(self):
         draw_empty_figure(

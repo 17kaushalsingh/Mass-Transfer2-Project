@@ -36,6 +36,7 @@ import matplotlib.pyplot as plt
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
+from .animation_tab import AnimationTab
 from .ui_helpers import animate_widget_in, draw_empty_figure
 
 
@@ -117,6 +118,7 @@ class ComparisonTab(QWidget):
         self._workers_done = 0
         self._worker_A: Optional[_ComparisonWorker] = None
         self._worker_B: Optional[_ComparisonWorker] = None
+        self.animation_tab: Optional[AnimationTab] = None
         self._setup_ui()
 
     # ------------------------------------------------------------------
@@ -271,7 +273,23 @@ class ComparisonTab(QWidget):
         hv.addWidget(self.heatmap_canvas)
         self.results_tabs.addTab(heatmap_widget, "Heatmap")
 
-        # Tab 3: Summary Table
+        # Tab 3: Animation
+        animation_widget = QWidget()
+        av = QVBoxLayout(animation_widget)
+        anim_ctrl = QHBoxLayout()
+        anim_ctrl.addWidget(QLabel("Animate:"))
+        self.anim_mode_combo = QComboBox()
+        self.anim_mode_combo.addItems(["Mode A", "Mode B"])
+        self.anim_mode_combo.currentIndexChanged.connect(self._on_animation_target_changed)
+        anim_ctrl.addWidget(self.anim_mode_combo)
+        anim_ctrl.addStretch()
+        av.addLayout(anim_ctrl)
+        self.animation_tab = AnimationTab(self, show_source_controls=False)
+        self.animation_tab.set_solver_factory(self._build_animation_solver)
+        av.addWidget(self.animation_tab)
+        self.results_tabs.addTab(animation_widget, "Animation")
+
+        # Tab 4: Summary Table
         summary_widget = QWidget()
         suv = QVBoxLayout(summary_widget)
         self.summary_table = QTableWidget()
@@ -291,7 +309,37 @@ class ComparisonTab(QWidget):
 
     def set_model(self, eq_model: "EquilibriumModel"):
         self.eq_model = eq_model
+        if self.animation_tab is not None:
+            self.animation_tab.set_model(eq_model)
         self.status_label.setText("Equilibrium model ready. Compare any two extraction modes.")
+
+    def _on_animation_target_changed(self, index: int):
+        if self.animation_tab is None:
+            return
+        if index == 0 and self._result_A is not None:
+            self.animation_tab.set_result(self._result_A)
+        elif index == 1 and self._result_B is not None:
+            self.animation_tab.set_result(self._result_B)
+
+    def _build_animation_solver(self):
+        if self.eq_model is None:
+            raise ValueError("Load equilibrium data first.")
+
+        target_idx = self.anim_mode_combo.currentIndex()
+        mode_idx = self.mode_A_combo.currentIndex() if target_idx == 0 else self.mode_B_combo.currentIndex()
+        solver_func, kwargs = _build_solver(
+            mode_idx,
+            self.eq_model,
+            feed_A=self.feed_A_spin.value(),
+            feed_C=self.feed_C_spin.value(),
+            feed_flow=self.feed_flow_spin.value(),
+            solvent=self.solvent_spin.value(),
+            n_stages=self.n_stages_spin.value(),
+            reflux_ratio=self.reflux_spin.value(),
+            x_raff=self.x_raff_spin.value(),
+            x_ext=self.x_ext_spin.value(),
+        )
+        return solver_func, kwargs
 
     # ------------------------------------------------------------------
     # Mode change handler
@@ -388,6 +436,7 @@ class ComparisonTab(QWidget):
         self._plot_stage_diagram()
         self._show_heatmaps("combined")
         self._build_summary_table()
+        self._on_animation_target_changed(self.anim_mode_combo.currentIndex())
         self.results_tabs.setCurrentIndex(0)
 
     def _plot_stage_diagram(self):

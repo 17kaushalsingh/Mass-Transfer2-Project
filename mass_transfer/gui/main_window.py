@@ -26,7 +26,6 @@ from .data_input_tab import DataInputTab
 from .simulation_tab import SimulationTab
 from .surrogate_tab import SurrogateTab
 from .comparison_tab import ComparisonTab
-from .animation_tab import AnimationTab
 from .home_tab import HomeTab
 from .theme import apply_app_theme
 
@@ -50,9 +49,9 @@ class MainWindow(QMainWindow):
         self._setup_tabs()
         self._setup_statusbar()
 
-        # Auto-load default data
+        # Auto-load default data while keeping Home as the opening tab.
         if DEFAULT_DATA_PATH.exists():
-            self._load_data(str(DEFAULT_DATA_PATH))
+            self._load_data(str(DEFAULT_DATA_PATH), switch_to_data_tab=False)
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -90,7 +89,6 @@ class MainWindow(QMainWindow):
         self.sim_tab = SimulationTab(self)
         self.surrogate_tab = SurrogateTab(self)
         self.comparison_tab = ComparisonTab(self)
-        self.animation_tab = AnimationTab(self)
 
         self.home_tab.load_default_btn.clicked.connect(self.load_default_data)
         self.home_tab.open_sim_btn.clicked.connect(
@@ -105,7 +103,6 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.sim_tab, "Simulation")
         self.tabs.addTab(self.surrogate_tab, "Surrogate Model")
         self.tabs.addTab(self.comparison_tab, "⚖ Comparison")
-        self.tabs.addTab(self.animation_tab, "🎬 Animation")
 
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
@@ -118,16 +115,16 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(index)
 
     def load_default_data(self) -> None:
-        self._load_data(str(DEFAULT_DATA_PATH))
+        self._load_data(str(DEFAULT_DATA_PATH), switch_to_data_tab=True)
 
     def _on_load(self):
         filepath, _ = QFileDialog.getOpenFileName(
             self, "Load Equilibrium Data", "", "JSON Files (*.json);;All Files (*)"
         )
         if filepath:
-            self._load_data(filepath)
+            self._load_data(filepath, switch_to_data_tab=True)
 
-    def _load_data(self, filepath: str):
+    def _load_data(self, filepath: str, switch_to_data_tab: bool = True):
         try:
             tie_data = load_tie_line_data(filepath)
             self.eq_model = fit_equilibrium_model(tie_data)
@@ -135,11 +132,11 @@ class MainWindow(QMainWindow):
             self.sim_tab.set_model(self.eq_model)
             self.surrogate_tab.set_model(self.eq_model, filepath)
             self.comparison_tab.set_model(self.eq_model)
-            self.animation_tab.set_model(self.eq_model)
             self.statusbar.showMessage(
                 f"Loaded {len(tie_data.A_raff)} tie-lines from {Path(filepath).name}"
             )
-            self.switch_to_tab(self.data_tab)
+            if switch_to_data_tab:
+                self.switch_to_tab(self.data_tab)
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to load data:\n{e}")
 

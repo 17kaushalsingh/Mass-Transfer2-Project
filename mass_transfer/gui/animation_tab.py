@@ -6,7 +6,7 @@ parameter sweeps.
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -20,12 +20,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -36,14 +34,11 @@ if TYPE_CHECKING:
 from .ui_helpers import animate_widget_in, draw_empty_figure
 
 
-# -------------------------------------------------------------------
-# Worker that generates the animation in a background thread
-# -------------------------------------------------------------------
-
 class AnimationWorker(QThread):
     """Generate an animation object (and optional GIF bytes) off-thread."""
+
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object)   # emits dict with anim + metadata
+    finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
     def __init__(self, anim_type: str, eq_model, result, params: dict):
@@ -56,13 +51,13 @@ class AnimationWorker(QThread):
     def run(self):
         try:
             from ..viz.animations import (
-                animate_xy_stepping,
-                animate_ternary_buildup,
                 animate_composition_profile,
                 animate_parameter_sweep,
+                animate_ternary_buildup,
+                animate_xy_stepping,
                 save_animation_gif,
             )
-            import tempfile, os
+            import tempfile
 
             fps = self.params.get("fps", 3)
 
@@ -91,27 +86,24 @@ class AnimationWorker(QThread):
             else:
                 raise ValueError(f"Unknown animation type: {self.anim_type}")
 
-            # Save to a temp GIF so we can replay frame-by-frame
             tmp = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
             tmp_path = tmp.name
             tmp.close()
             save_animation_gif(anim, tmp_path, fps=fps, dpi=90)
 
-            self.finished.emit({
-                "anim": anim,
-                "gif_path": tmp_path,
-                "fps": fps,
-                "n_frames": anim._fig is not None,
-            })
-
+            self.finished.emit(
+                {
+                    "anim": anim,
+                    "gif_path": tmp_path,
+                    "fps": fps,
+                    "n_frames": anim._fig is not None,
+                }
+            )
         except Exception as e:
             import traceback
+
             self.error.emit(f"{e}\n{traceback.format_exc()}")
 
-
-# -------------------------------------------------------------------
-# Solver worker (re-run a sim if user doesn't have a result yet)
-# -------------------------------------------------------------------
 
 class _SolverWorker(QThread):
     finished = pyqtSignal(object)
@@ -129,10 +121,6 @@ class _SolverWorker(QThread):
             self.error.emit(str(e))
 
 
-# -------------------------------------------------------------------
-# Animation Tab
-# -------------------------------------------------------------------
-
 ANIM_TYPES = [
     ("Stage-by-Stage X-Y Stepping", "xy_stepping"),
     ("Ternary Diagram Build-up", "ternary"),
@@ -142,146 +130,128 @@ ANIM_TYPES = [
 
 
 class AnimationTab(QWidget):
-    """Tab for generating and previewing animated GIF visualizations."""
+    """Embedded animation widget tied to the active solver context."""
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        show_source_controls: bool = True,
+        solver_factory: Optional[Callable[[], tuple]] = None,
+    ):
         super().__init__(parent)
         self.eq_model: Optional[EquilibriumModel] = None
-        self._last_result = None       # most recent solver result
+        self._show_source_controls = show_source_controls
+        self._solver_factory = solver_factory
+        self._last_result = None
         self._gif_path: Optional[str] = None
         self._anim = None
         self._frame_idx = 0
         self._frame_images = []
         self._timer: Optional[QTimer] = None
         self._worker: Optional[AnimationWorker] = None
+        self._solver_worker: Optional[_SolverWorker] = None
         self._setup_ui()
-
-    # ==================================================================
-    # UI setup
-    # ==================================================================
 
     def _setup_ui(self):
         root = QHBoxLayout(self)
         root.setSpacing(16)
 
-        # ---- LEFT: Controls ----
         left = QVBoxLayout()
         left.setSpacing(12)
 
         intro = QLabel(
-            "Step 6: replay a recent result or generate a fresh crosscurrent run to create "
-            "animated stage, ternary, composition, or parameter-sweep visuals."
+            "Generate one animation view for the current solver context. "
+            "Use the type selector to switch between stage, ternary, profile, and sweep views."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
         left.addWidget(intro)
 
-        # Animation type
         type_group = QGroupBox("Animation Type")
-        tl = QFormLayout(type_group)
+        type_layout = QFormLayout(type_group)
         self.type_combo = QComboBox()
         for label, _ in ANIM_TYPES:
             self.type_combo.addItem(label)
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
-        tl.addRow("Type:", self.type_combo)
+        type_layout.addRow("Type:", self.type_combo)
         left.addWidget(type_group)
 
-        # Source controls
-        src_group = QGroupBox("Simulation Source")
-        sl = QFormLayout(src_group)
+        source_group = QGroupBox("Animation Source")
+        source_layout = QVBoxLayout(source_group)
+        source_label = QLabel("This animation panel is bound to the active solver context.")
+        source_label.setWordWrap(True)
+        source_label.setProperty("class", "helperText")
+        source_layout.addWidget(source_label)
+        left.addWidget(source_group)
+        source_group.setVisible(self._show_source_controls)
 
-        self.src_combo = QComboBox()
-        self.src_combo.addItems([
-            "Use last simulation result",
-            "Run fresh Crosscurrent",
-        ])
-        sl.addRow("Source:", self.src_combo)
-
-        self.src_stages = QSpinBox()
-        self.src_stages.setRange(1, 50); self.src_stages.setValue(3)
-        sl.addRow("Stages:", self.src_stages)
-
-        self.src_solvent = QDoubleSpinBox()
-        self.src_solvent.setRange(1, 100000); self.src_solvent.setValue(1000)
-        self.src_solvent.setSuffix(" kg")
-        sl.addRow("Solvent/stage:", self.src_solvent)
-
-        self.src_feed_A = QDoubleSpinBox()
-        self.src_feed_A.setRange(0, 100); self.src_feed_A.setValue(75.0)
-        self.src_feed_A.setSuffix(" wt%")
-        sl.addRow("Carrier (A):", self.src_feed_A)
-
-        self.src_feed_C = QDoubleSpinBox()
-        self.src_feed_C.setRange(0, 100); self.src_feed_C.setValue(25.0)
-        self.src_feed_C.setSuffix(" wt%")
-        sl.addRow("Solute (C):", self.src_feed_C)
-
-        left.addWidget(src_group)
-
-        # Speed
         speed_group = QGroupBox("Playback")
-        spl = QFormLayout(speed_group)
-
+        speed_layout = QFormLayout(speed_group)
         self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(1, 10); self.fps_spin.setValue(3)
+        self.fps_spin.setRange(1, 10)
+        self.fps_spin.setValue(3)
         self.fps_spin.setSuffix(" FPS")
-        self.fps_spin.setToolTip("Playback speed for export and preview.")
-        spl.addRow("Speed:", self.fps_spin)
+        self.fps_spin.setToolTip("Preview and export playback speed.")
+        speed_layout.addRow("Speed:", self.fps_spin)
         left.addWidget(speed_group)
 
-        # Parameter sweep controls (shown only in sweep mode)
-        self.sweep_group = QGroupBox("Sweep Parameters")
-        swl = QFormLayout(self.sweep_group)
-
+        self.sweep_group = QGroupBox("Parameter Sweep")
+        sweep_layout = QFormLayout(self.sweep_group)
         self.sweep_var_combo = QComboBox()
         self.sweep_var_combo.addItems(["solvent_per_stage", "n_stages", "feed_acid_pct"])
-        swl.addRow("Sweep variable:", self.sweep_var_combo)
+        sweep_layout.addRow("Sweep variable:", self.sweep_var_combo)
 
         self.sweep_min_spin = QDoubleSpinBox()
-        self.sweep_min_spin.setRange(1, 50000); self.sweep_min_spin.setValue(100)
-        swl.addRow("Range min:", self.sweep_min_spin)
+        self.sweep_min_spin.setRange(1, 50000)
+        self.sweep_min_spin.setValue(100)
+        sweep_layout.addRow("Range min:", self.sweep_min_spin)
 
         self.sweep_max_spin = QDoubleSpinBox()
-        self.sweep_max_spin.setRange(1, 50000); self.sweep_max_spin.setValue(5000)
-        swl.addRow("Range max:", self.sweep_max_spin)
+        self.sweep_max_spin.setRange(1, 50000)
+        self.sweep_max_spin.setValue(5000)
+        sweep_layout.addRow("Range max:", self.sweep_max_spin)
 
         self.sweep_frames_spin = QSpinBox()
-        self.sweep_frames_spin.setRange(5, 100); self.sweep_frames_spin.setValue(30)
-        swl.addRow("Frames:", self.sweep_frames_spin)
+        self.sweep_frames_spin.setRange(5, 100)
+        self.sweep_frames_spin.setValue(30)
+        sweep_layout.addRow("Frames:", self.sweep_frames_spin)
 
         self.sweep_fixed_stages = QSpinBox()
-        self.sweep_fixed_stages.setRange(1, 20); self.sweep_fixed_stages.setValue(5)
-        swl.addRow("Fixed stages:", self.sweep_fixed_stages)
+        self.sweep_fixed_stages.setRange(1, 20)
+        self.sweep_fixed_stages.setValue(5)
+        sweep_layout.addRow("Fixed stages:", self.sweep_fixed_stages)
 
         self.sweep_fixed_solvent = QDoubleSpinBox()
-        self.sweep_fixed_solvent.setRange(1, 50000); self.sweep_fixed_solvent.setValue(1000)
-        swl.addRow("Fixed solvent:", self.sweep_fixed_solvent)
+        self.sweep_fixed_solvent.setRange(1, 50000)
+        self.sweep_fixed_solvent.setValue(1000)
+        sweep_layout.addRow("Fixed solvent:", self.sweep_fixed_solvent)
 
         self.sweep_fixed_acid = QDoubleSpinBox()
-        self.sweep_fixed_acid.setRange(1, 50); self.sweep_fixed_acid.setValue(25)
-        swl.addRow("Fixed acid %:", self.sweep_fixed_acid)
+        self.sweep_fixed_acid.setRange(1, 50)
+        self.sweep_fixed_acid.setValue(25)
+        sweep_layout.addRow("Fixed acid %:", self.sweep_fixed_acid)
 
         left.addWidget(self.sweep_group)
         self.sweep_group.hide()
 
-        # Buttons
-        btn_layout = QHBoxLayout()
-        self.gen_btn = QPushButton("▶ Generate Animation")
+        button_row = QHBoxLayout()
+        self.gen_btn = QPushButton("Generate Animation")
         self.gen_btn.setProperty("class", "primary")
         self.gen_btn.setMinimumHeight(44)
         self.gen_btn.clicked.connect(self._generate)
-        btn_layout.addWidget(self.gen_btn)
+        button_row.addWidget(self.gen_btn)
 
-        self.save_btn = QPushButton("💾 Save GIF")
+        self.save_btn = QPushButton("Save GIF")
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._save_gif)
-        btn_layout.addWidget(self.save_btn)
-        left.addLayout(btn_layout)
+        button_row.addWidget(self.save_btn)
+        left.addLayout(button_row)
 
         self.progress = QProgressBar()
         left.addWidget(self.progress)
 
-        self.status_label = QLabel("Select an animation type and click Generate.")
+        self.status_label = QLabel("Generate an animation for the current solver context.")
         self.status_label.setProperty("class", "statusCard")
         self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
@@ -289,42 +259,35 @@ class AnimationTab(QWidget):
 
         root.addLayout(left, stretch=1)
 
-        # ---- RIGHT: Preview ----
         right = QVBoxLayout()
-
         preview_group = QGroupBox("Animation Preview")
-        pv = QVBoxLayout(preview_group)
-
+        preview_layout = QVBoxLayout(preview_group)
         self.canvas = FigureCanvas(Figure(figsize=(11, 8)))
-        pv.addWidget(self.canvas)
+        preview_layout.addWidget(self.canvas)
 
-        # Playback controls
-        playback_layout = QHBoxLayout()
+        footer = QHBoxLayout()
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.setEnabled(False)
         self.play_btn.clicked.connect(self._toggle_playback)
-        playback_layout.addWidget(self.play_btn)
-
+        footer.addWidget(self.play_btn)
         self.frame_label = QLabel("Frame: —")
-        playback_layout.addWidget(self.frame_label)
-        playback_layout.addStretch()
-        pv.addLayout(playback_layout)
-
+        footer.addWidget(self.frame_label)
+        footer.addStretch()
+        preview_layout.addLayout(footer)
         right.addWidget(preview_group)
         root.addLayout(right, stretch=3)
-        self._draw_empty_state()
 
-    # ==================================================================
-    # Public
-    # ==================================================================
+        self._draw_empty_state()
 
     def set_model(self, eq_model: "EquilibriumModel"):
         self.eq_model = eq_model
 
     def set_result(self, result):
-        """Called from sim tab when a new result is available."""
         self._last_result = result
-        self.status_label.setText("Simulation result available. Generate an animation or reuse the latest run.")
+        self.status_label.setText("Current result ready. Generate an animation for this solver context.")
+
+    def set_solver_factory(self, solver_factory: Callable[[], tuple]) -> None:
+        self._solver_factory = solver_factory
 
     def _draw_empty_state(self):
         draw_empty_figure(
@@ -334,77 +297,61 @@ class AnimationTab(QWidget):
         )
         self.canvas.draw()
 
-    # ==================================================================
-    # Type toggle
-    # ==================================================================
-
     def _on_type_changed(self, idx):
-        is_sweep = (ANIM_TYPES[idx][1] == "param_sweep")
-        if is_sweep:
-            self.sweep_group.show()
-        else:
-            self.sweep_group.hide()
-
-    # ==================================================================
-    # Generate animation
-    # ==================================================================
+        is_sweep = ANIM_TYPES[idx][1] == "param_sweep"
+        self.sweep_group.setVisible(is_sweep)
 
     def _generate(self):
         if self.eq_model is None:
             QMessageBox.warning(self, "No Model", "Load equilibrium data first.")
             return
 
-        anim_key = ANIM_TYPES[self.type_combo.currentIndex()][1]
-        fps = self.fps_spin.value()
+        self.gen_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self.play_btn.setEnabled(False)
+        self.progress.setValue(0)
 
-        if anim_key == "param_sweep":
-            # Sweep doesn't need a prior result; it solves internally
-            self._start_animation_worker(anim_key, None, fps)
-            return
+        if self._solver_factory is not None:
+            self.status_label.setText("Running the current solver context before animation generation…")
+            try:
+                solver_func, kwargs = self._solver_factory()
+            except Exception as e:
+                self.gen_btn.setEnabled(True)
+                QMessageBox.critical(self, "Animation Source Error", str(e))
+                return
 
-        # Non-sweep: need a solver result
-        if self.src_combo.currentIndex() == 0 and self._last_result is not None:
-            self._start_animation_worker(anim_key, self._last_result, fps)
-        else:
-            # Run a fresh crosscurrent solve first
-            self.gen_btn.setEnabled(False)
-            self.status_label.setText("Running solver…")
-            from ..core.crosscurrent import solve_crosscurrent
-            kwargs = dict(
-                feed_A=self.src_feed_A.value(),
-                feed_C=self.src_feed_C.value(),
-                feed_flow=100.0,
-                solvent_per_stage=self.src_solvent.value(),
-                n_stages=self.src_stages.value(),
-                eq_model=self.eq_model,
-            )
-            self._solver_worker = _SolverWorker(solve_crosscurrent, kwargs)
-            self._solver_worker.finished.connect(
-                lambda r: self._on_solver_done(r, anim_key, fps)
-            )
+            self._solver_worker = _SolverWorker(solver_func, kwargs)
+            self._solver_worker.finished.connect(self._on_solver_done)
             self._solver_worker.error.connect(self._on_solver_error)
             self._solver_worker.start()
+            return
 
-    def _on_solver_done(self, result, anim_key, fps):
+        if self._last_result is None:
+            self.gen_btn.setEnabled(True)
+            QMessageBox.information(
+                self,
+                "No Result",
+                "Run the current solver context first so an animation can be generated.",
+            )
+            return
+
+        self._start_animation_worker(self._last_result)
+
+    def _on_solver_done(self, result):
         self._last_result = result
-        self._start_animation_worker(anim_key, result, fps)
+        self._start_animation_worker(result)
 
     def _on_solver_error(self, msg):
         self.gen_btn.setEnabled(True)
         self.status_label.setText("Solver error!")
         QMessageBox.critical(self, "Solver Error", msg)
 
-    def _start_animation_worker(self, anim_key, result, fps):
-        self.gen_btn.setEnabled(False)
-        self.play_btn.setEnabled(False)
-        self.save_btn.setEnabled(False)
+    def _start_animation_worker(self, result):
         self.status_label.setText("Generating animation frames…")
-        self.progress.setValue(0)
-
-        params = {"fps": fps}
+        anim_key = ANIM_TYPES[self.type_combo.currentIndex()][1]
+        params = {"fps": self.fps_spin.value()}
         if anim_key == "param_sweep":
-            sweep_var = self.sweep_var_combo.currentText()
-            params["sweep_var"] = sweep_var
+            params["sweep_var"] = self.sweep_var_combo.currentText()
             params["sweep_range"] = (self.sweep_min_spin.value(), self.sweep_max_spin.value())
             params["n_frames"] = self.sweep_frames_spin.value()
             params["fixed_vals"] = {
@@ -425,60 +372,44 @@ class AnimationTab(QWidget):
 
     def _on_gen_done(self, data: dict):
         self.gen_btn.setEnabled(True)
-        self._gif_path = data.get("gif_path")
-        self._anim = data.get("anim")
+        self.save_btn.setEnabled(True)
+        self.play_btn.setEnabled(True)
+        self._gif_path = data["gif_path"]
 
-        # Load GIF frames into PIL for preview playback
         try:
             from PIL import Image
-            import io
+
             img = Image.open(self._gif_path)
             self._frame_images = []
             try:
                 while True:
-                    frame = img.copy().convert("RGBA")
-                    self._frame_images.append(frame)
+                    self._frame_images.append(img.copy().convert("RGBA"))
                     img.seek(img.tell() + 1)
             except EOFError:
                 pass
 
             n = len(self._frame_images)
-            import os
-            size_kb = os.path.getsize(self._gif_path) / 1024
-
             self.status_label.setText(
-                f"<b>Done!</b> {n} frames, "
-                f"{n / data['fps']:.1f}s duration, "
-                f"{size_kb:.0f} KB"
+                f"<b>Done.</b> {n} frames, {n / data['fps']:.1f}s duration."
             )
-            self.play_btn.setEnabled(True)
-            self.save_btn.setEnabled(True)
             self._frame_idx = 0
             self._show_frame(0)
             self.frame_label.setText(f"Frame: 1 / {n}")
-
         except Exception as e:
-            self.status_label.setText(f"GIF saved but preview failed: {e}")
-            self.save_btn.setEnabled(True)
+            self.status_label.setText(f"Animation generated but preview failed: {e}")
 
     def _on_gen_error(self, msg):
         self.gen_btn.setEnabled(True)
         self.status_label.setText("Error generating animation!")
         QMessageBox.critical(self, "Animation Error", msg)
 
-    # ==================================================================
-    # Playback
-    # ==================================================================
-
     def _show_frame(self, idx):
-        """Render a single PIL frame onto the canvas."""
         if not self._frame_images or idx >= len(self._frame_images):
             return
 
         import numpy as np
-        frame = self._frame_images[idx]
-        arr = np.array(frame)
 
+        arr = np.array(self._frame_images[idx])
         fig = self.canvas.figure
         fig.clear()
         ax = fig.add_axes([0, 0, 1, 1])
@@ -497,37 +428,34 @@ class AnimationTab(QWidget):
             return
 
         self._frame_idx = 0
-        fps = self.fps_spin.value()
-        interval_ms = max(50, 1000 // fps)
-
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._advance_frame)
+        interval_ms = max(50, 1000 // self.fps_spin.value())
+        if self._timer is None:
+            self._timer = QTimer(self)
+            self._timer.timeout.connect(self._advance_frame)
         self._timer.start(interval_ms)
         self.play_btn.setText("⏸ Pause")
 
     def _advance_frame(self):
-        n = len(self._frame_images)
-        if self._frame_idx >= n:
+        if self._frame_idx >= len(self._frame_images):
             self._timer.stop()
             self.play_btn.setText("▶ Play")
             return
 
         self._show_frame(self._frame_idx)
-        self.frame_label.setText(f"Frame: {self._frame_idx + 1} / {n}")
+        self.frame_label.setText(f"Frame: {self._frame_idx + 1} / {len(self._frame_images)}")
         self._frame_idx += 1
-
-    # ==================================================================
-    # Save
-    # ==================================================================
 
     def _save_gif(self):
         if self._gif_path is None:
             return
         filepath, _ = QFileDialog.getSaveFileName(
-            self, "Save Animation GIF", "extraction_animation.gif",
-            "GIF Files (*.gif);;All Files (*)"
+            self,
+            "Save Animation GIF",
+            "extraction_animation.gif",
+            "GIF Files (*.gif);;All Files (*)",
         )
         if filepath:
             import shutil
+
             shutil.copy2(self._gif_path, filepath)
             QMessageBox.information(self, "Saved", f"Animation saved to {filepath}")

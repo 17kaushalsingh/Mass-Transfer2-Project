@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
 from .heatmap_tab import HeatmapTab
+from .animation_tab import AnimationTab
 from .ui_helpers import animate_widget_in, draw_empty_figure
 
 
@@ -63,6 +64,7 @@ class SimulationTab(QWidget):
         self.worker: Optional[SolverWorker] = None
         self.last_result = None
         self.heatmap_tab: Optional[HeatmapTab] = None
+        self.animation_tab: Optional[AnimationTab] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -215,6 +217,11 @@ class SimulationTab(QWidget):
         self.heatmap_scroll.setWidget(self.heatmap_tab)
         self.results_tabs.addTab(self.heatmap_scroll, "Heatmaps")
 
+        # Animation subtab
+        self.animation_tab = AnimationTab(self, show_source_controls=False)
+        self.animation_tab.set_solver_factory(self._build_animation_solver)
+        self.results_tabs.addTab(self.animation_tab, "Animation")
+
         right.addWidget(self.results_tabs)
 
         main_layout.addLayout(right, stretch=2)
@@ -224,7 +231,45 @@ class SimulationTab(QWidget):
         self.eq_model = eq_model
         if self.heatmap_tab is not None:
             self.heatmap_tab.set_model(eq_model)
+        if self.animation_tab is not None:
+            self.animation_tab.set_model(eq_model)
         self.status_label.setText("Equilibrium model ready. Configure conditions and run the solver.")
+
+    def _build_animation_solver(self):
+        if self.eq_model is None:
+            raise ValueError("Load equilibrium data first.")
+
+        mode = self.mode_combo.currentIndex()
+        if mode == 0:
+            from ..core.crosscurrent import solve_crosscurrent
+            return solve_crosscurrent, dict(
+                feed_A=self.feed_A_spin.value(),
+                feed_C=self.feed_C_spin.value(),
+                feed_flow=self.feed_flow_spin.value(),
+                solvent_per_stage=self.solvent_spin.value(),
+                n_stages=self.n_stages_spin.value(),
+                eq_model=self.eq_model,
+            )
+        if mode == 1:
+            from ..core.countercurrent import solve_countercurrent_simple
+            return solve_countercurrent_simple, dict(
+                feed_A=self.feed_A_spin.value(),
+                feed_C=self.feed_C_spin.value(),
+                feed_flow=self.feed_flow_spin.value(),
+                solvent_flow=self.solvent_spin.value(),
+                n_stages=self.n_stages_spin.value(),
+                eq_model=self.eq_model,
+            )
+        from ..core.countercurrent import solve_countercurrent_reflux
+        return solve_countercurrent_reflux, dict(
+            feed_A=self.feed_A_spin.value(),
+            feed_C=self.feed_C_spin.value(),
+            feed_flow=self.feed_flow_spin.value(),
+            reflux_ratio=self.reflux_spin.value(),
+            X_raff_spec=self.x_raff_spin.value(),
+            X_ext_spec=self.x_ext_spin.value(),
+            eq_model=self.eq_model,
+        )
 
     def _on_mode_changed(self, index):
         is_reflux = index == 2
@@ -320,12 +365,10 @@ class SimulationTab(QWidget):
 
         if self.heatmap_tab is not None:
             self.heatmap_tab.set_result(result)
-            self.results_tabs.setCurrentWidget(self.heatmap_scroll)
+        if self.animation_tab is not None:
+            self.animation_tab.set_result(result)
+        self.results_tabs.setCurrentWidget(self.heatmap_scroll)
 
-        # Notify animation tab
-        main = self.window()
-        if hasattr(main, "animation_tab"):
-            main.animation_tab.set_result(result)
 
     def _on_solver_error(self, msg):
         self.run_btn.setEnabled(True)
