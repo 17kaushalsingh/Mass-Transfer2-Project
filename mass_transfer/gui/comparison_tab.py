@@ -36,6 +36,8 @@ import matplotlib.pyplot as plt
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
+from .ui_helpers import animate_widget_in, draw_empty_figure
+
 
 # ---------------------------------------------------------------------------
 # Worker thread (same pattern as simulation_tab.py)
@@ -123,10 +125,19 @@ class ComparisonTab(QWidget):
 
     def _setup_ui(self):
         root = QHBoxLayout(self)
+        root.setSpacing(16)
 
         # ---- LEFT: shared inputs ----
         left = QVBoxLayout()
         left.setSpacing(6)
+
+        intro = QLabel(
+            "Step 5: compare two extraction strategies side by side using the same feed "
+            "conditions so stage diagrams, heatmaps, and summary metrics stay directly comparable."
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("class", "sectionIntro")
+        left.addWidget(intro)
 
         # Mode selectors
         mode_group = QGroupBox("Modes to Compare")
@@ -208,12 +219,13 @@ class ComparisonTab(QWidget):
 
         # Run button
         self.run_btn = QPushButton("Run Comparison")
+        self.run_btn.setProperty("class", "primary")
         self.run_btn.setMinimumHeight(44)
-        self.run_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.run_btn.clicked.connect(self._run_comparison)
         left.addWidget(self.run_btn)
 
-        self.status_label = QLabel("")
+        self.status_label = QLabel("Choose two modes and run a side-by-side comparison.")
+        self.status_label.setProperty("class", "statusCard")
         self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
         left.addStretch()
@@ -279,6 +291,7 @@ class ComparisonTab(QWidget):
 
     def set_model(self, eq_model: "EquilibriumModel"):
         self.eq_model = eq_model
+        self.status_label.setText("Equilibrium model ready. Compare any two extraction modes.")
 
     # ------------------------------------------------------------------
     # Mode change handler
@@ -435,6 +448,7 @@ class ComparisonTab(QWidget):
         fig.suptitle("Stage-by-Stage Comparison (X-Y Diagram)", fontsize=13, y=1.01)
         fig.tight_layout()
         self.stage_canvas.draw()
+        animate_widget_in(self.stage_canvas)
 
     def _show_heatmaps(self, hm_type: str):
         """Render side-by-side heatmaps (or N/A panels if result is None)."""
@@ -485,6 +499,7 @@ class ComparisonTab(QWidget):
         fig.suptitle(f"Heatmap Comparison — {label_map.get(hm_type, hm_type)}", fontsize=13)
         fig.tight_layout()
         self.heatmap_canvas.draw()
+        animate_widget_in(self.heatmap_canvas)
 
     def _draw_heatmap_axes(self, result, hm_type: str, axes_list, title_prefix: str):
         """Draw heatmap(s) for one result into a list of axes."""
@@ -683,22 +698,33 @@ class ComparisonTab(QWidget):
                 self.summary_table.setItem(row, col, item)
 
         self.summary_table.resizeColumnsToContents()
+        animate_widget_in(self.summary_table)
 
     # ------------------------------------------------------------------
     # Placeholder & helpers
     # ------------------------------------------------------------------
 
     def _show_placeholder(self):
-        """Show placeholder text on the stage canvas before first run."""
-        fig = self.stage_canvas.figure
-        fig.clear()
-        ax = fig.add_subplot(111)
-        ax.text(0.5, 0.5,
-                "Select two modes above and click\n\"Run Comparison\" to see results.",
-                ha="center", va="center", fontsize=14, color="gray",
-                transform=ax.transAxes)
-        ax.set_axis_off()
+        """Show placeholder content before the first comparison run."""
+        draw_empty_figure(
+            self.stage_canvas.figure,
+            "Comparison Stage View",
+            "Select two modes above and run the comparison to populate both stage diagrams.",
+        )
         self.stage_canvas.draw()
+        draw_empty_figure(
+            self.heatmap_canvas.figure,
+            "Comparison Heatmaps",
+            "The heatmap notebook fills after both solvers finish, letting you inspect composition, flow, and removal together.",
+        )
+        self.heatmap_canvas.draw()
+
+        self.summary_table.setColumnCount(3)
+        self.summary_table.setHorizontalHeaderLabels(["Metric", "Mode A", "Mode B"])
+        self.summary_table.setRowCount(1)
+        self.summary_table.setItem(0, 0, QTableWidgetItem("Status"))
+        self.summary_table.setItem(0, 1, QTableWidgetItem("Awaiting run"))
+        self.summary_table.setItem(0, 2, QTableWidgetItem("Awaiting run"))
 
     def _export(self, canvas: FigureCanvas):
         filepath, _ = QFileDialog.getSaveFileName(

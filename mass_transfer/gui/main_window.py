@@ -24,10 +24,11 @@ from PyQt6.QtWidgets import (
 from ..core.equilibrium import load_tie_line_data, fit_equilibrium_model, EquilibriumModel
 from .data_input_tab import DataInputTab
 from .simulation_tab import SimulationTab
-from .heatmap_tab import HeatmapTab
 from .surrogate_tab import SurrogateTab
 from .comparison_tab import ComparisonTab
 from .animation_tab import AnimationTab
+from .home_tab import HomeTab
+from .theme import apply_app_theme
 
 
 DEFAULT_DATA_PATH = resources.files("mass_transfer").joinpath(
@@ -36,12 +37,12 @@ DEFAULT_DATA_PATH = resources.files("mass_transfer").joinpath(
 
 
 class MainWindow(QMainWindow):
-    """Main application window with 4-tab layout."""
+    """Main application window for the desktop workflow."""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Multistage Extraction Digital Twin")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1320, 860)
 
         self.eq_model: EquilibriumModel | None = None
 
@@ -80,18 +81,28 @@ class MainWindow(QMainWindow):
 
     def _setup_tabs(self):
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setMovable(False)
         self.setCentralWidget(self.tabs)
 
+        self.home_tab = HomeTab(self)
         self.data_tab = DataInputTab(self)
         self.sim_tab = SimulationTab(self)
-        self.heatmap_tab = HeatmapTab(self)
         self.surrogate_tab = SurrogateTab(self)
         self.comparison_tab = ComparisonTab(self)
         self.animation_tab = AnimationTab(self)
 
+        self.home_tab.load_default_btn.clicked.connect(self.load_default_data)
+        self.home_tab.open_sim_btn.clicked.connect(
+            lambda: self.switch_to_tab(self.sim_tab)
+        )
+        self.home_tab.open_surrogate_btn.clicked.connect(
+            lambda: self.switch_to_tab(self.surrogate_tab)
+        )
+
+        self.tabs.addTab(self.home_tab, "Home")
         self.tabs.addTab(self.data_tab, "Data Input")
         self.tabs.addTab(self.sim_tab, "Simulation")
-        self.tabs.addTab(self.heatmap_tab, "Heatmaps")
         self.tabs.addTab(self.surrogate_tab, "Surrogate Model")
         self.tabs.addTab(self.comparison_tab, "⚖ Comparison")
         self.tabs.addTab(self.animation_tab, "🎬 Animation")
@@ -99,7 +110,15 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
-        self.statusbar.showMessage("Ready. Load equilibrium data to begin.")
+        self.statusbar.showMessage("Ready. Default equilibrium data will load automatically.")
+
+    def switch_to_tab(self, tab_widget: QWidget) -> None:
+        index = self.tabs.indexOf(tab_widget)
+        if index >= 0:
+            self.tabs.setCurrentIndex(index)
+
+    def load_default_data(self) -> None:
+        self._load_data(str(DEFAULT_DATA_PATH))
 
     def _on_load(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -114,13 +133,13 @@ class MainWindow(QMainWindow):
             self.eq_model = fit_equilibrium_model(tie_data)
             self.data_tab.set_data(tie_data, self.eq_model)
             self.sim_tab.set_model(self.eq_model)
-            self.heatmap_tab.set_model(self.eq_model)
             self.surrogate_tab.set_model(self.eq_model, filepath)
             self.comparison_tab.set_model(self.eq_model)
             self.animation_tab.set_model(self.eq_model)
             self.statusbar.showMessage(
                 f"Loaded {len(tie_data.A_raff)} tie-lines from {Path(filepath).name}"
             )
+            self.switch_to_tab(self.data_tab)
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to load data:\n{e}")
 
@@ -139,6 +158,7 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    apply_app_theme(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

@@ -33,6 +33,8 @@ from matplotlib.figure import Figure
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
+from .ui_helpers import animate_widget_in, draw_empty_figure
+
 
 # -------------------------------------------------------------------
 # Worker that generates the animation in a background thread
@@ -160,9 +162,19 @@ class AnimationTab(QWidget):
 
     def _setup_ui(self):
         root = QHBoxLayout(self)
+        root.setSpacing(16)
 
         # ---- LEFT: Controls ----
         left = QVBoxLayout()
+        left.setSpacing(12)
+
+        intro = QLabel(
+            "Step 6: replay a recent result or generate a fresh crosscurrent run to create "
+            "animated stage, ternary, composition, or parameter-sweep visuals."
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("class", "sectionIntro")
+        left.addWidget(intro)
 
         # Animation type
         type_group = QGroupBox("Animation Type")
@@ -213,6 +225,7 @@ class AnimationTab(QWidget):
         self.fps_spin = QSpinBox()
         self.fps_spin.setRange(1, 10); self.fps_spin.setValue(3)
         self.fps_spin.setSuffix(" FPS")
+        self.fps_spin.setToolTip("Playback speed for export and preview.")
         spl.addRow("Speed:", self.fps_spin)
         left.addWidget(speed_group)
 
@@ -254,8 +267,8 @@ class AnimationTab(QWidget):
         # Buttons
         btn_layout = QHBoxLayout()
         self.gen_btn = QPushButton("▶ Generate Animation")
+        self.gen_btn.setProperty("class", "primary")
         self.gen_btn.setMinimumHeight(44)
-        self.gen_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.gen_btn.clicked.connect(self._generate)
         btn_layout.addWidget(self.gen_btn)
 
@@ -268,7 +281,8 @@ class AnimationTab(QWidget):
         self.progress = QProgressBar()
         left.addWidget(self.progress)
 
-        self.status_label = QLabel("Select animation type and click Generate.")
+        self.status_label = QLabel("Select an animation type and click Generate.")
+        self.status_label.setProperty("class", "statusCard")
         self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
         left.addStretch()
@@ -298,6 +312,7 @@ class AnimationTab(QWidget):
 
         right.addWidget(preview_group)
         root.addLayout(right, stretch=3)
+        self._draw_empty_state()
 
     # ==================================================================
     # Public
@@ -309,6 +324,15 @@ class AnimationTab(QWidget):
     def set_result(self, result):
         """Called from sim tab when a new result is available."""
         self._last_result = result
+        self.status_label.setText("Simulation result available. Generate an animation or reuse the latest run.")
+
+    def _draw_empty_state(self):
+        draw_empty_figure(
+            self.canvas.figure,
+            "Animation Preview",
+            "Generate an animation to preview stage motion, composition evolution, or a parameter sweep here.",
+        )
+        self.canvas.draw()
 
     # ==================================================================
     # Type toggle
@@ -461,6 +485,7 @@ class AnimationTab(QWidget):
         ax.imshow(arr)
         ax.set_axis_off()
         self.canvas.draw()
+        animate_widget_in(self.canvas, duration=160)
 
     def _toggle_playback(self):
         if self._timer is not None and self._timer.isActive():

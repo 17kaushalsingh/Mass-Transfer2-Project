@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
     QHeaderView,
@@ -30,6 +31,9 @@ from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
+
+from .heatmap_tab import HeatmapTab
+from .ui_helpers import animate_widget_in, draw_empty_figure
 
 
 class SolverWorker(QThread):
@@ -58,13 +62,24 @@ class SimulationTab(QWidget):
         self.eq_model: Optional[EquilibriumModel] = None
         self.worker: Optional[SolverWorker] = None
         self.last_result = None
+        self.heatmap_tab: Optional[HeatmapTab] = None
         self._setup_ui()
 
     def _setup_ui(self):
         main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(16)
 
         # Left: inputs
         left = QVBoxLayout()
+        left.setSpacing(12)
+
+        intro = QLabel(
+            "Step 2: choose an extraction mode, set feed and operating conditions, "
+            "then run the solver to populate the results table, stage diagram, heatmaps, and animations."
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("class", "sectionIntro")
+        left.addWidget(intro)
 
         # Mode selector
         mode_group = QGroupBox("Extraction Mode")
@@ -86,11 +101,13 @@ class SimulationTab(QWidget):
         self.feed_A_spin = QDoubleSpinBox()
         self.feed_A_spin.setRange(0, 100); self.feed_A_spin.setValue(75.0)
         self.feed_A_spin.setSuffix(" wt%")
+        self.feed_A_spin.setToolTip("Carrier fraction in the incoming feed stream.")
         feed_layout.addRow("Carrier (A):", self.feed_A_spin)
 
         self.feed_C_spin = QDoubleSpinBox()
         self.feed_C_spin.setRange(0, 100); self.feed_C_spin.setValue(25.0)
         self.feed_C_spin.setSuffix(" wt%")
+        self.feed_C_spin.setToolTip("Solute fraction in the incoming feed stream.")
         feed_layout.addRow("Solute (C):", self.feed_C_spin)
 
         self.feed_flow_spin = QDoubleSpinBox()
@@ -106,11 +123,13 @@ class SimulationTab(QWidget):
 
         self.n_stages_spin = QSpinBox()
         self.n_stages_spin.setRange(1, 50); self.n_stages_spin.setValue(2)
+        self.n_stages_spin.setToolTip("Number of ideal extraction stages to calculate.")
         self.op_layout.addRow("Stages:", self.n_stages_spin)
 
         self.solvent_spin = QDoubleSpinBox()
         self.solvent_spin.setRange(1, 100000); self.solvent_spin.setValue(1000.0)
         self.solvent_spin.setSuffix(" kg")
+        self.solvent_spin.setToolTip("Fresh solvent per stage for crosscurrent mode.")
         self.op_layout.addRow("Solvent/stage:", self.solvent_spin)
 
         # Reflux-specific inputs (hidden initially)
@@ -142,12 +161,14 @@ class SimulationTab(QWidget):
 
         # Run button
         self.run_btn = QPushButton("Run Simulation")
+        self.run_btn.setProperty("class", "primary")
         self.run_btn.setMinimumHeight(40)
-        self.run_btn.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.run_btn.clicked.connect(self._run_solver)
         left.addWidget(self.run_btn)
 
-        self.status_label = QLabel("")
+        self.status_label = QLabel("Ready for a new simulation run.")
+        self.status_label.setProperty("class", "statusCard")
+        self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
         left.addStretch()
 
@@ -155,8 +176,12 @@ class SimulationTab(QWidget):
 
         # Right: results
         right = QVBoxLayout()
+        self.results_tabs = QTabWidget()
+        self.results_tabs.setDocumentMode(True)
 
-        # Results table
+        # Results subtab
+        results_page = QWidget()
+        results_layout = QVBoxLayout(results_page)
         table_group = QGroupBox("Results")
         table_layout = QVBoxLayout(table_group)
         self.results_table = QTableWidget()
@@ -166,20 +191,40 @@ class SimulationTab(QWidget):
         table_layout.addWidget(self.results_table)
         self.summary_label = QLabel("")
         self.summary_label.setWordWrap(True)
+        self.summary_label.setProperty("class", "metricCard")
         table_layout.addWidget(self.summary_label)
-        right.addWidget(table_group, stretch=1)
+        results_layout.addWidget(table_group)
+        self.results_tabs.addTab(results_page, "Results")
 
-        # Plot
+        # Stage diagram subtab
+        stage_page = QWidget()
+        stage_layout = QVBoxLayout(stage_page)
         plot_group = QGroupBox("Stage Diagram")
         plot_layout = QVBoxLayout(plot_group)
         self.canvas = FigureCanvas(Figure(figsize=(8, 6)))
         plot_layout.addWidget(self.canvas)
-        right.addWidget(plot_group, stretch=2)
+        stage_layout.addWidget(plot_group)
+        self.results_tabs.addTab(stage_page, "Stage Diagram")
+
+        # Heatmaps subtab
+        self.heatmap_scroll = QScrollArea()
+        self.heatmap_scroll.setWidgetResizable(True)
+        self.heatmap_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.heatmap_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.heatmap_tab = HeatmapTab(self)
+        self.heatmap_scroll.setWidget(self.heatmap_tab)
+        self.results_tabs.addTab(self.heatmap_scroll, "Heatmaps")
+
+        right.addWidget(self.results_tabs)
 
         main_layout.addLayout(right, stretch=2)
+        self._draw_empty_state()
 
     def set_model(self, eq_model: EquilibriumModel):
         self.eq_model = eq_model
+        if self.heatmap_tab is not None:
+            self.heatmap_tab.set_model(eq_model)
+        self.status_label.setText("Equilibrium model ready. Configure conditions and run the solver.")
 
     def _on_mode_changed(self, index):
         is_reflux = index == 2
@@ -216,7 +261,7 @@ class SimulationTab(QWidget):
 
         mode = self.mode_combo.currentIndex()
         self.run_btn.setEnabled(False)
-        self.status_label.setText("Solving...")
+        self.status_label.setText("Solving current operating point. Results will appear here when the solver finishes.")
 
         if mode == 0:  # Crosscurrent
             from ..core.crosscurrent import solve_crosscurrent
@@ -262,7 +307,7 @@ class SimulationTab(QWidget):
     def _on_solver_done(self, result):
         self.run_btn.setEnabled(True)
         self.last_result = result
-        self.status_label.setText("Solver finished.")
+        self.status_label.setText("Simulation complete. Review the Results, Stage Diagram, and Heatmaps subtabs.")
 
         mode = self.mode_combo.currentIndex()
 
@@ -273,10 +318,12 @@ class SimulationTab(QWidget):
         else:
             self._display_reflux_results(result)
 
-        # Notify heatmap tab and animation tab
+        if self.heatmap_tab is not None:
+            self.heatmap_tab.set_result(result)
+            self.results_tabs.setCurrentWidget(self.heatmap_scroll)
+
+        # Notify animation tab
         main = self.window()
-        if hasattr(main, "heatmap_tab"):
-            main.heatmap_tab.set_result(result)
         if hasattr(main, "animation_tab"):
             main.animation_tab.set_result(result)
 
@@ -284,6 +331,14 @@ class SimulationTab(QWidget):
         self.run_btn.setEnabled(True)
         self.status_label.setText("Solver error!")
         QMessageBox.critical(self, "Solver Error", msg)
+
+    def _draw_empty_state(self):
+        draw_empty_figure(
+            self.canvas.figure,
+            "Stage Diagram",
+            "Run a simulation to see stage stepping and summary results for the selected extraction mode.",
+        )
+        self.canvas.draw()
 
     def _display_crosscurrent_results(self, result):
         stages = result.stages
@@ -305,9 +360,10 @@ class SimulationTab(QWidget):
                 self.results_table.setItem(i, j, item)
 
         self.summary_label.setText(
-            f"<b>Summary:</b> {result.n_stages} stages, "
-            f"Total removal: {result.total_pct_removal:.2f}%, "
-            f"Final X_raff: {result.final_raff_X:.4f}, "
+            f"<b>Crosscurrent Summary</b><br>"
+            f"Stages: <b>{result.n_stages}</b>  |  "
+            f"Removal: <b>{result.total_pct_removal:.2f}%</b>  |  "
+            f"Final X_raff: <b>{result.final_raff_X:.4f}</b><br>"
             f"Mixed extract flow: {result.mixed_extract_flow:.1f} kg"
         )
         self._plot_crosscurrent(result)
@@ -332,9 +388,10 @@ class SimulationTab(QWidget):
                 self.results_table.setItem(i, j, item)
 
         self.summary_label.setText(
-            f"<b>Summary:</b> {result.n_stages} stages, "
-            f"Raffinate X: {stages[0].X_raff:.4f}, "
-            f"Extract Y: {stages[-1].Y_ext:.4f}"
+            f"<b>Countercurrent Summary</b><br>"
+            f"Stages: <b>{result.n_stages}</b>  |  "
+            f"Lead raffinate X: <b>{stages[0].X_raff:.4f}</b>  |  "
+            f"Terminal extract Y: <b>{stages[-1].Y_ext:.4f}</b>"
         )
         self._plot_countercurrent(result)
 
@@ -380,6 +437,7 @@ class SimulationTab(QWidget):
 
         self.canvas.figure.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)
 
     def _plot_countercurrent(self, result):
         import numpy as np
@@ -412,3 +470,4 @@ class SimulationTab(QWidget):
 
         self.canvas.figure.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)

@@ -26,6 +26,8 @@ from matplotlib.figure import Figure
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel, TieLineData
 
+from .ui_helpers import animate_widget_in, draw_empty_figure
+
 
 COLUMNS = ["A_raff", "C_raff", "B_raff", "A_ext", "C_ext", "B_ext"]
 
@@ -40,9 +42,19 @@ class DataInputTab(QWidget):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
+        layout.setSpacing(16)
 
         # Left: data table
         left_panel = QVBoxLayout()
+        left_panel.setSpacing(12)
+
+        intro = QLabel(
+            "Step 1: review the tie-line dataset, then refit the equilibrium model if you "
+            "edit any values. The phase envelope and distribution plot update together."
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("class", "sectionIntro")
+        left_panel.addWidget(intro)
 
         table_group = QGroupBox("Tie-Line Data (wt%)")
         table_layout = QVBoxLayout(table_group)
@@ -59,6 +71,7 @@ class DataInputTab(QWidget):
         self.remove_btn = QPushButton("Remove Row")
         self.remove_btn.clicked.connect(self._remove_row)
         self.fit_btn = QPushButton("Fit Model")
+        self.fit_btn.setProperty("class", "primary")
         self.fit_btn.clicked.connect(self._fit_model)
         btn_layout.addWidget(self.add_btn)
         btn_layout.addWidget(self.remove_btn)
@@ -70,6 +83,7 @@ class DataInputTab(QWidget):
         # R² display
         self.r2_label = QLabel("R² values will appear after fitting.")
         self.r2_label.setWordWrap(True)
+        self.r2_label.setProperty("class", "metricCard")
         left_panel.addWidget(self.r2_label)
 
         layout.addLayout(left_panel, stretch=1)
@@ -84,6 +98,7 @@ class DataInputTab(QWidget):
         right_panel.addWidget(plot_group)
 
         layout.addLayout(right_panel, stretch=2)
+        self._draw_empty_state()
 
     def set_data(self, tie_data: TieLineData, eq_model: EquilibriumModel):
         """Populate the table and plots from loaded data."""
@@ -162,8 +177,6 @@ class DataInputTab(QWidget):
                 main.eq_model = self.eq_model
                 if hasattr(main, "sim_tab"):
                     main.sim_tab.set_model(self.eq_model)
-                if hasattr(main, "heatmap_tab"):
-                    main.heatmap_tab.set_model(self.eq_model)
 
             self._update_r2_display()
             self._update_plots()
@@ -181,8 +194,17 @@ class DataInputTab(QWidget):
             lines.append(f'<span style="color:{color}">{name}: {val:.4f}</span><br>')
         self.r2_label.setText("".join(lines))
 
+    def _draw_empty_state(self):
+        draw_empty_figure(
+            self.canvas.figure,
+            "Equilibrium Preview",
+            "Load or fit tie-line data to preview the phase envelope and the X-Y distribution diagram.",
+        )
+        self.canvas.draw()
+
     def _update_plots(self):
         if self.eq_model is None:
+            self._draw_empty_state()
             return
 
         import numpy as np
@@ -230,3 +252,4 @@ class DataInputTab(QWidget):
 
         self.canvas.figure.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)

@@ -23,6 +23,8 @@ from matplotlib.figure import Figure
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
+from .ui_helpers import animate_widget_in, draw_empty_figure
+
 
 class HeatmapTab(QWidget):
     """Tab for displaying extraction heatmaps."""
@@ -35,6 +37,16 @@ class HeatmapTab(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        self.setMinimumSize(1180, 980)
+
+        intro = QLabel(
+            "Step 3: once a simulation has run, use these views to inspect stage-wise composition, "
+            "flow trends, and removal performance."
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("class", "sectionIntro")
+        layout.addWidget(intro)
 
         # Controls
         ctrl_layout = QHBoxLayout()
@@ -90,22 +102,35 @@ class HeatmapTab(QWidget):
 
         # Canvas
         self.canvas = FigureCanvas(Figure(figsize=(14, 8)))
+        self.canvas.setMinimumSize(1120, 820)
         layout.addWidget(self.canvas)
 
-        self.info_label = QLabel("Run a simulation first to view heatmaps.")
+        self.info_label = QLabel("Run a simulation first to unlock the heatmaps and profile views.")
+        self.info_label.setProperty("class", "statusCard")
+        self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
+        self._draw_empty_state()
 
     def set_model(self, eq_model: EquilibriumModel):
         self.eq_model = eq_model
 
     def set_result(self, result):
         self.result = result
-        self.info_label.setText("Click a heatmap type to visualize.")
+        self.info_label.setText("Simulation results received. Choose a heatmap or profile view.")
         self._show_heatmap("combined")
+
+    def _draw_empty_state(self):
+        draw_empty_figure(
+            self.canvas.figure,
+            "Heatmaps and Profiles",
+            "Run a simulation in the Simulation tab to populate stage-wise composition, flow, and removal views.",
+        )
+        self.canvas.draw()
 
     def _show_heatmap(self, hmap_type: str):
         if self.result is None:
             QMessageBox.information(self, "No Data", "Run a simulation first.")
+            self._draw_empty_state()
             return
 
         # Update button states
@@ -149,6 +174,7 @@ class HeatmapTab(QWidget):
         # Copy figure content to canvas
         self.canvas.figure = fig
         self.canvas.draw()
+        animate_widget_in(self.canvas)
 
     def _show_countercurrent_heatmap(self):
         """Show a simple heatmap for countercurrent results."""
@@ -173,6 +199,7 @@ class HeatmapTab(QWidget):
         ax.set_title("Countercurrent Stage Compositions")
         self.canvas.figure.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)
 
     def _export(self):
         if self.canvas.figure is None:
@@ -241,6 +268,7 @@ class HeatmapTab(QWidget):
         fig.suptitle('Concentration & Flow Rate Profiles', fontsize=14, y=1.01)
         fig.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)
 
     def _show_raff_vs_ext(self):
         """Grouped bar chart: raffinate vs extract compositions at each stage."""

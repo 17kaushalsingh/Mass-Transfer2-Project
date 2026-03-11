@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +32,8 @@ from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
+
+from .ui_helpers import animate_widget_in, draw_empty_figure
 
 
 DEFAULT_DATA_PATH = str(
@@ -191,12 +194,40 @@ class SurrogateTab(QWidget):
 
     def _setup_ui(self):
         main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(16)
 
         # Left panel: controls
         left_panel = QWidget()
         left_panel.setMinimumWidth(420)
         left = QVBoxLayout(left_panel)
         left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(12)
+
+        intro = QLabel(
+            "Step 4: generate operating data, train the surrogate, and then use the same "
+            "workspace for prediction, optimization, and solver-vs-model comparison."
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("class", "sectionIntro")
+        left.addWidget(intro)
+
+        self.workflow_tabs = QTabWidget()
+        self.workflow_tabs.setDocumentMode(True)
+        left.addWidget(self.workflow_tabs)
+
+        # Default workflow tab: Data generation + training
+        setup_page = QWidget()
+        setup_layout = QVBoxLayout(setup_page)
+        setup_layout.setContentsMargins(0, 0, 0, 0)
+        setup_layout.setSpacing(12)
+
+        setup_hint = QLabel(
+            "Default workflow: first generate a dataset, then train the surrogate. "
+            "Use the other subtabs for prediction, optimization, and solver comparison."
+        )
+        setup_hint.setWordWrap(True)
+        setup_hint.setProperty("class", "helperText")
+        setup_layout.addWidget(setup_hint)
 
         # Data generation
         gen_group = QGroupBox("1. Generate Training Data")
@@ -209,16 +240,19 @@ class SurrogateTab(QWidget):
         gen_layout.addRow("Samples:", self.n_samples_spin)
 
         self.gen_btn = QPushButton("Generate Data")
+        self.gen_btn.setProperty("class", "primary")
         self.gen_btn.clicked.connect(self._generate_data)
         gen_layout.addRow(self.gen_btn)
 
         self.gen_progress = QProgressBar()
         gen_layout.addRow(self.gen_progress)
 
-        self.gen_info = QLabel("")
+        self.gen_info = QLabel("Generate a dataset to begin the surrogate workflow.")
+        self.gen_info.setProperty("class", "statusCard")
+        self.gen_info.setWordWrap(True)
         gen_layout.addRow(self.gen_info)
 
-        left.addWidget(gen_group)
+        setup_layout.addWidget(gen_group)
 
         # Training
         train_group = QGroupBox("2. Train Model")
@@ -226,11 +260,13 @@ class SurrogateTab(QWidget):
 
         self.epochs_spin = QSpinBox()
         self.epochs_spin.setRange(10, 1000); self.epochs_spin.setValue(200)
+        self.epochs_spin.setToolTip("Maximum epochs used during ANN training.")
         train_layout.addRow("Epochs:", self.epochs_spin)
 
         self.lr_spin = QDoubleSpinBox()
         self.lr_spin.setRange(0.0001, 0.1); self.lr_spin.setValue(0.001)
         self.lr_spin.setDecimals(4); self.lr_spin.setSingleStep(0.0001)
+        self.lr_spin.setToolTip("Learning rate for the optimizer.")
         train_layout.addRow("Learning rate:", self.lr_spin)
 
         self.test_size_spin = QDoubleSpinBox()
@@ -246,6 +282,7 @@ class SurrogateTab(QWidget):
         train_layout.addRow("Val split:", self.val_size_spin)
 
         self.train_btn = QPushButton("Train Model")
+        self.train_btn.setProperty("class", "primary")
         self.train_btn.clicked.connect(self._train_model)
         train_layout.addRow(self.train_btn)
 
@@ -257,13 +294,19 @@ class SurrogateTab(QWidget):
         self.train_progress = QProgressBar()
         train_layout.addRow(self.train_progress)
 
-        self.train_info = QLabel("")
+        self.train_info = QLabel("No training run yet.")
+        self.train_info.setProperty("class", "statusCard")
         self.train_info.setWordWrap(True)
         train_layout.addRow(self.train_info)
 
-        left.addWidget(train_group)
+        setup_layout.addWidget(train_group)
+        setup_layout.addStretch()
+        self.workflow_tabs.addTab(setup_page, "Workflow")
 
-        # Prediction
+        # Prediction tab
+        predict_page = QWidget()
+        predict_layout_wrap = QVBoxLayout(predict_page)
+        predict_layout_wrap.setContentsMargins(0, 0, 0, 0)
         pred_group = QGroupBox("3. Predict")
         pred_layout = QFormLayout(pred_group)
 
@@ -283,13 +326,19 @@ class SurrogateTab(QWidget):
         self.pred_btn.clicked.connect(self._predict)
         pred_layout.addRow(self.pred_btn)
 
-        self.pred_result = QLabel("")
-        self.pred_result.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.pred_result = QLabel("Prediction results will appear here.")
+        self.pred_result.setProperty("class", "metricCard")
+        self.pred_result.setWordWrap(True)
         pred_layout.addRow(self.pred_result)
 
-        left.addWidget(pred_group)
+        predict_layout_wrap.addWidget(pred_group)
+        predict_layout_wrap.addStretch()
+        self.workflow_tabs.addTab(predict_page, "Predict")
 
-        # Optimization
+        # Optimization tab
+        optimize_page = QWidget()
+        optimize_layout_wrap = QVBoxLayout(optimize_page)
+        optimize_layout_wrap.setContentsMargins(0, 0, 0, 0)
         opt_group = QGroupBox("4. Optimize")
         opt_layout = QFormLayout(opt_group)
 
@@ -302,13 +351,19 @@ class SurrogateTab(QWidget):
         self.opt_btn.clicked.connect(self._optimize)
         opt_layout.addRow(self.opt_btn)
 
-        self.opt_result = QLabel("")
+        self.opt_result = QLabel("Optimization suggestions will appear here.")
+        self.opt_result.setProperty("class", "metricCard")
         self.opt_result.setWordWrap(True)
         opt_layout.addRow(self.opt_result)
 
-        left.addWidget(opt_group)
+        optimize_layout_wrap.addWidget(opt_group)
+        optimize_layout_wrap.addStretch()
+        self.workflow_tabs.addTab(optimize_page, "Optimize")
 
-        # ------ 5. Compare NN vs Solver ------
+        # Compare tab
+        compare_page = QWidget()
+        compare_layout_wrap = QVBoxLayout(compare_page)
+        compare_layout_wrap.setContentsMargins(0, 0, 0, 0)
         cmp_group = QGroupBox("5. Compare NN vs Solver")
         cmp_layout = QFormLayout(cmp_group)
 
@@ -349,11 +404,14 @@ class SurrogateTab(QWidget):
         self.cmp_progress = QProgressBar()
         cmp_layout.addRow(self.cmp_progress)
 
-        self.cmp_info = QLabel("")
+        self.cmp_info = QLabel("Train the model first, then compare its predictions against fresh solver evaluations.")
+        self.cmp_info.setProperty("class", "statusCard")
         self.cmp_info.setWordWrap(True)
         cmp_layout.addRow(self.cmp_info)
 
-        left.addWidget(cmp_group)
+        compare_layout_wrap.addWidget(cmp_group)
+        compare_layout_wrap.addStretch()
+        self.workflow_tabs.addTab(compare_page, "Compare NN")
         left.addStretch()
 
         # Hide sweep-only widgets initially
@@ -399,10 +457,20 @@ class SurrogateTab(QWidget):
         right.addWidget(self.canvas)
 
         main_layout.addLayout(right, stretch=2)
+        self._draw_empty_state()
 
     def set_model(self, eq_model: EquilibriumModel, data_path: str = DEFAULT_DATA_PATH):
         self.eq_model = eq_model
         self.data_path = data_path
+        self.gen_info.setText("Equilibrium model ready. Generate data to start the surrogate workflow.")
+
+    def _draw_empty_state(self):
+        draw_empty_figure(
+            self.canvas.figure,
+            "Surrogate Workspace",
+            "Generate data and train a model to fill this area with loss curves, data split visuals, response surfaces, and solver comparisons.",
+        )
+        self.canvas.draw()
 
     def _generate_data(self):
         if self.eq_model is None:
@@ -428,7 +496,7 @@ class SurrogateTab(QWidget):
     def _on_gen_done(self, df):
         self.gen_btn.setEnabled(True)
         self.dataset = df
-        self.gen_info.setText(f"Generated {len(df)} samples.")
+        self.gen_info.setText(f"Dataset ready: <b>{len(df)}</b> samples generated. Train the model when you are ready.")
 
     def _on_gen_error(self, msg):
         self.gen_btn.setEnabled(True)
@@ -471,8 +539,10 @@ class SurrogateTab(QWidget):
         self.split_viz_btn.setEnabled(True)
         self.training_result = result
         self.train_info.setText(
-            f"<b>Done!</b> R²={result.test_r_squared:.4f}, "
-            f"MAE={result.test_mae:.2f}%, RMSE={result.test_rmse:.2f}%<br>"
+            f"<b>Training complete.</b><br>"
+            f"R²: <b>{result.test_r_squared:.4f}</b>  |  "
+            f"MAE: <b>{result.test_mae:.2f}%</b>  |  "
+            f"RMSE: <b>{result.test_rmse:.2f}%</b><br>"
             f"Split: {result.n_train} train / {result.n_val} val / {result.n_test} test "
             f"(of {result.n_total} total)"
         )
@@ -497,6 +567,7 @@ class SurrogateTab(QWidget):
             ax.set_yscale("log")
         self.canvas.figure.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)
 
     def _plot_data_split(self):
         """Visualize the train/val/test split and test-set predictions."""
@@ -575,6 +646,7 @@ class SurrogateTab(QWidget):
         fig.suptitle("Train-Test Data Split Visualization", fontsize=13, y=1.01)
         fig.tight_layout()
         self.canvas.draw()
+        animate_widget_in(self.canvas)
 
     def _predict(self):
         if self.training_result is None:
@@ -590,7 +662,12 @@ class SurrogateTab(QWidget):
             solvent=self.pred_solvent.value(),
             feed_comp=self.pred_acid.value(),
         )
-        self.pred_result.setText(f"Predicted removal: {result:.2f}%")
+        self.pred_result.setText(
+            f"<b>Predicted removal</b><br>"
+            f"{result:.2f}% for {self.pred_stages.value()} stages, "
+            f"{self.pred_solvent.value():.0f} kg solvent/stage, "
+            f"and {self.pred_acid.value():.2f}% feed acid."
+        )
 
     def _optimize(self):
         if self.training_result is None:
@@ -603,10 +680,10 @@ class SurrogateTab(QWidget):
             target_removal=self.target_removal_spin.value(),
         )
         self.opt_result.setText(
-            f"<b>Optimal:</b><br>"
-            f"Stages: {result['n_stages']}<br>"
-            f"Solvent/stage: {result['solvent_per_stage']:.0f} kg<br>"
-            f"Predicted removal: {result['predicted_removal']:.2f}%<br>"
+            f"<b>Recommended operating point</b><br>"
+            f"Stages: <b>{result['n_stages']}</b><br>"
+            f"Solvent/stage: <b>{result['solvent_per_stage']:.0f} kg</b><br>"
+            f"Predicted removal: <b>{result['predicted_removal']:.2f}%</b><br>"
             f"Total solvent: {result['total_solvent']:.0f} kg"
         )
 
