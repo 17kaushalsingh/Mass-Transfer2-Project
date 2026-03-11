@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -192,7 +193,10 @@ class SurrogateTab(QWidget):
         main_layout = QHBoxLayout(self)
 
         # Left panel: controls
-        left = QVBoxLayout()
+        left_panel = QWidget()
+        left_panel.setMinimumWidth(420)
+        left = QVBoxLayout(left_panel)
+        left.setContentsMargins(0, 0, 0, 0)
 
         # Data generation
         gen_group = QGroupBox("1. Generate Training Data")
@@ -362,7 +366,12 @@ class SurrogateTab(QWidget):
         for lbl, wid in self._sweep_widgets:
             lbl.hide(); wid.hide()
 
-        main_layout.addLayout(left, stretch=1)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setWidget(left_panel)
+
+        main_layout.addWidget(left_scroll, stretch=1)
 
         # Right panel: plots
         right = QVBoxLayout()
