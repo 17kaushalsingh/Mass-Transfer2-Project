@@ -1,16 +1,11 @@
 """Tests for the equilibrium model."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-# Ensure src is importable
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from src.core.equilibrium import (
+from mass_transfer.core.equilibrium import (
     load_tie_line_data,
     fit_equilibrium_model,
     get_raffinate_point_from_X,
@@ -20,7 +15,8 @@ from src.core.equilibrium import (
     get_N_from_ternary,
 )
 
-DATA_PATH = ROOT / "data.json"
+ROOT = Path(__file__).resolve().parent.parent
+DATA_PATH = ROOT / "mass_transfer" / "resources" / "data" / "default_tie_lines.json"
 
 
 @pytest.fixture

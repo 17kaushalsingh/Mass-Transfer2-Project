@@ -18,7 +18,7 @@ import seaborn as sns
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
-    from src.core.crosscurrent import CrosscurrentResult
+    from mass_transfer.core.crosscurrent import CrosscurrentResult
 
 
 def composition_heatmap(

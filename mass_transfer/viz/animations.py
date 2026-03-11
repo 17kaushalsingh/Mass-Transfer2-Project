@@ -23,7 +23,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
-    from src.core.equilibrium import EquilibriumModel
+    from mass_transfer.core.equilibrium import EquilibriumModel
 
 
 # ============================================================================
@@ -56,7 +56,7 @@ def animate_xy_stepping(
     -------
     FuncAnimation that can be saved via .save() or played in Qt.
     """
-    from src.core.crosscurrent import CrosscurrentResult
+    from mass_transfer.core.crosscurrent import CrosscurrentResult
 
     data = eq_model.tie_line_data
     is_cc = isinstance(result, CrosscurrentResult)
@@ -172,7 +172,7 @@ def animate_ternary_buildup(
     """
     Animate stages appearing on the right-angle ternary diagram (B vs C axes).
     """
-    from src.core.crosscurrent import CrosscurrentResult
+    from mass_transfer.core.crosscurrent import CrosscurrentResult
 
     data = eq_model.tie_line_data
     is_cc = isinstance(result, CrosscurrentResult)
@@ -261,7 +261,7 @@ def animate_composition_profile(
     """
     Animate a bar chart of raffinate compositions growing one stage at a time.
     """
-    from src.core.crosscurrent import CrosscurrentResult
+    from mass_transfer.core.crosscurrent import CrosscurrentResult
     is_cc = isinstance(result, CrosscurrentResult)
 
     fig, axes = plt.subplots(1, 2, figsize=figsize, width_ratios=[3, 1])
@@ -378,7 +378,7 @@ def animate_parameter_sweep(
     fps : frames per second
     progress_callback : optional (current, total) callback
     """
-    from src.core.crosscurrent import solve_crosscurrent
+    from mass_transfer.core.crosscurrent import solve_crosscurrent
 
     if fixed_vals is None:
         fixed_vals = {

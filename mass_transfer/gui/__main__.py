@@ -1,4 +1,4 @@
-"""Entry point for: python -m src.gui"""
+"""Entry point for: python -m mass_transfer.gui"""
 
 from .main_window import main
 

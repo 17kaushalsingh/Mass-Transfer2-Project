@@ -24,7 +24,8 @@ Thumbs.db
 *.pt
 *.pth
 *.csv
-!data.json
+artifacts/
+outputs/
 
 # Jupyter
 .ipynb_checkpoints/

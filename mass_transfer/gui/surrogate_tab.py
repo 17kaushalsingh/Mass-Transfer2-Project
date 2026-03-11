@@ -4,6 +4,7 @@ Surrogate Model tab: data generation, ANN training, prediction, and response sur
 
 from __future__ import annotations
 
+from importlib import resources
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -29,6 +30,11 @@ from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
+
+
+DEFAULT_DATA_PATH = str(
+    resources.files("mass_transfer").joinpath("resources/data/default_tie_lines.json")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +183,7 @@ class SurrogateTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.eq_model: Optional[EquilibriumModel] = None
-        self.data_path: str = "data.json"
+        self.data_path: str = DEFAULT_DATA_PATH
         self.dataset = None
         self.training_result = None
         self._setup_ui()
@@ -385,7 +391,7 @@ class SurrogateTab(QWidget):
 
         main_layout.addLayout(right, stretch=2)
 
-    def set_model(self, eq_model: EquilibriumModel, data_path: str = "data.json"):
+    def set_model(self, eq_model: EquilibriumModel, data_path: str = DEFAULT_DATA_PATH):
         self.eq_model = eq_model
         self.data_path = data_path
 

@@ -16,7 +16,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
-    from src.core.equilibrium import EquilibriumModel
+    from mass_transfer.core.equilibrium import EquilibriumModel
 
 
 def plot_right_angle_triangle(

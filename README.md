@@ -113,7 +113,7 @@ Fit a neural network model (ANN or RNN) to predict **percentage removal** or **s
 
 **Conditions:** 98.5 °C, 625 lb/in² abs.
 
-Smoothed equilibrium tie-line data (in weight percent) is provided in [`data.json`](./data.json).
+Smoothed equilibrium tie-line data (in weight percent) is bundled with the package at [`mass_transfer/resources/data/default_tie_lines.json`](/Users/17kaushalsingh/GitHub/Mass-Transfer2-Project/mass_transfer/resources/data/default_tie_lines.json).
 
 ---
 
@@ -162,14 +162,15 @@ Perform computations on the coordinate systems of parts (a) and (b):
 
 ```
 Mass-Transfer2-Project/
-├── data.json                  # Default equilibrium tie-line data (cottonseed oil system)
+├── pyproject.toml             # Packaging metadata and console script entry point
 ├── requirements.txt           # Pinned Python dependencies
 ├── CLAUDE.md                  # AI assistant instructions & implementation rules
 ├── README.md                  # This file — full implementation plan
+├── docs/
+│   └── Project_Description.pdf
 │
-├── src/                       # All source code
+├── mass_transfer/             # Installable Python package
 │   ├── __init__.py
-│   │
 │   ├── core/                  # Core solver engine
 │   │   ├── __init__.py
 │   │   ├── equilibrium.py     # Equilibrium data fitting & interpolation
@@ -189,17 +190,21 @@ Mass-Transfer2-Project/
 │   │   ├── neural_net.py      # PyTorch ANN model definition, training, evaluation
 │   │   └── optimization.py    # Response surface generation & process optimization
 │   │
-│   └── gui/                   # PyQt6 GUI
-│       ├── __init__.py
-│       ├── main_window.py     # Main application window & tab container
-│       ├── data_input_tab.py  # Equilibrium data input / loading
-│       ├── simulation_tab.py  # Crosscurrent & countercurrent simulation controls
-│       ├── heatmap_tab.py     # Heatmap display
-│       ├── surrogate_tab.py   # NN training, prediction, response surface & comparison
-│       ├── comparison_tab.py  # Side-by-side mode comparison (cross vs counter)
-│       └── animation_tab.py   # Animated GIF generation, preview & export
+│   ├── gui/                   # PyQt6 GUI
+│   │   ├── __init__.py
+│   │   ├── main_window.py     # Main application window & tab container
+│   │   ├── data_input_tab.py  # Equilibrium data input / loading
+│   │   ├── simulation_tab.py  # Crosscurrent & countercurrent simulation controls
+│   │   ├── heatmap_tab.py     # Heatmap display
+│   │   ├── surrogate_tab.py   # NN training, prediction, response surface & comparison
+│   │   ├── comparison_tab.py  # Side-by-side mode comparison (cross vs counter)
+│   │   └── animation_tab.py   # Animated GIF generation, preview & export
+│   │
+│   └── resources/
+│       └── data/
+│           └── default_tie_lines.json
 │
-├── tests/                     # Unit tests (53 tests)
+├── tests/                     # Unit tests
 │   ├── test_equilibrium.py
 │   ├── test_crosscurrent.py
 │   ├── test_countercurrent.py
@@ -219,12 +224,12 @@ Mass-Transfer2-Project/
 
 **Goal:** Load, validate, and model the ternary equilibrium data so it can be used by all solvers.
 
-**File:** `src/core/equilibrium.py`
+**File:** `mass_transfer/core/equilibrium.py`
 
 #### 0.1 Data Format & Conventions
 
 - **Components:** A = Cottonseed Oil (carrier), B = Propane (solvent), C = Oleic Acid (solute)
-- **data.json structure:** `phase_1` = raffinate-layer tie-line endpoints, `phase_2` = extract-layer tie-line endpoints. Each row index `i` in phase_1 connects to the same index `i` in phase_2 (they form a tie-line pair).
+- **default_tie_lines.json structure:** `phase_1` = raffinate-layer tie-line endpoints, `phase_2` = extract-layer tie-line endpoints. Each row index `i` in phase_1 connects to the same index `i` in phase_2 (they form a tie-line pair).
 - **Coordinate system:** Right-angle triangle where x-axis = wt% of A, y-axis = wt% of C, and B = 100 - A - C by closure.
 
 #### 0.2 Solvent-Free Basis Transformation
@@ -261,7 +266,7 @@ Generate the following plots:
 
 **Goal:** Solve multistage crosscurrent extraction for any number of stages using `fsolve`.
 
-**File:** `src/core/crosscurrent.py`
+**File:** `mass_transfer/core/crosscurrent.py`
 
 #### 1.1 Mathematical Formulation
 
@@ -299,7 +304,7 @@ Solve the specific problem: 100 kg feed with 25% oleic acid, 2 stages, 1000 kg p
 
 **Goal:** Solve countercurrent extraction including extract reflux for arbitrary stages.
 
-**File:** `src/core/countercurrent.py`
+**File:** `mass_transfer/core/countercurrent.py`
 
 #### 2.1 Simple Countercurrent (No Reflux) — Foundation
 
@@ -365,7 +370,7 @@ Solve: 1000 kg/h feed, 25% oleic acid → products at 2% and 90% acid (solvent-f
 
 **Goal:** Generate all required plots with publication-quality aesthetics.
 
-**File:** `src/viz/ternary_plots.py`, `src/viz/heatmaps.py`, `src/viz/surfaces.py`
+**File:** `mass_transfer/viz/ternary_plots.py`, `mass_transfer/viz/heatmaps.py`, `mass_transfer/viz/surfaces.py`
 
 #### 3.1 Equilibrium Plots (`ternary_plots.py`)
 
@@ -396,7 +401,7 @@ For any solved extraction (cross or countercurrent), generate heatmaps using Sea
 
 **Goal:** Generate synthetic data via solver sweeps, train a PyTorch ANN, and use it for fast prediction and optimization.
 
-#### 4.1 Synthetic Data Generation (`src/ml/data_generator.py`)
+#### 4.1 Synthetic Data Generation (`mass_transfer/ml/data_generator.py`)
 
 Run the crosscurrent/countercurrent solver over a grid of input parameters:
 
@@ -410,7 +415,7 @@ Run the crosscurrent/countercurrent solver over a grid of input parameters:
 
 Store as a Pandas DataFrame / CSV for reproducibility. Target ~5000–10000 data points.
 
-#### 4.2 Neural Network Model (`src/ml/neural_net.py`)
+#### 4.2 Neural Network Model (`mass_transfer/ml/neural_net.py`)
 
 **Architecture:**
 
@@ -496,7 +501,7 @@ graph TD
 
 **Prediction vs Actual plots:** Scatter plot of predicted vs actual % removal with R² annotation.
 
-#### 4.3 Response Surface & Optimization (`src/ml/optimization.py`)
+#### 4.3 Response Surface & Optimization (`mass_transfer/ml/optimization.py`)
 
 - Use the trained ANN as a fast predictor to generate dense response surfaces.
 - For each pair of inputs (holding the third constant), evaluate the model on a fine grid → plot 3D surface + contour.
@@ -508,7 +513,7 @@ graph TD
 
 **Goal:** Professional desktop application integrating all modules.
 
-**Files:** `src/gui/`
+**Files:** `mass_transfer/gui/`
 
 #### 5.1 Main Window (`main_window.py`)
 
@@ -598,7 +603,7 @@ graph TD
 
 Run the complete pipeline for the cottonseed oil system:
 
-1. Load `data.json` → fit equilibrium → verify plots match expected curves.
+1. Load the bundled default dataset → fit equilibrium → verify plots match expected curves.
 2. Solve Part (ii) crosscurrent → verify compositions and weights.
 3. Solve Part (iii) countercurrent with reflux → verify min stages, min reflux, design at R=4.5.
 4. Generate surrogate data → train NN → generate response surfaces.
@@ -648,9 +653,10 @@ source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+pip install -e .
 
 # Run the GUI application
-python -m src.gui
+python -m mass_transfer.gui
 
 # Run all tests (53 tests)
 python -m pytest tests/ -v
@@ -676,7 +682,7 @@ All 6 phases are implemented and tested:
 
 ## Quick Start
 
-1. **Launch the GUI:** `python -m src.gui`
+1. **Launch the GUI:** `python -m mass_transfer.gui` or `mass-transfer-gui`
 2. The default cottonseed oil equilibrium data loads automatically
 3. Go to **Simulation** tab → select mode → click **Run Simulation**
 4. View results in **Heatmaps** tab

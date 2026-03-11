@@ -1,16 +1,12 @@
 """Tests for the countercurrent extraction solver."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from src.core.equilibrium import load_tie_line_data, fit_equilibrium_model
-from src.core.countercurrent import (
+from mass_transfer.core.equilibrium import load_tie_line_data, fit_equilibrium_model
+from mass_transfer.core.countercurrent import (
     solve_countercurrent_simple,
     find_min_stages,
     find_min_reflux_ratio,
@@ -18,7 +14,8 @@ from src.core.countercurrent import (
     find_max_extract_purity,
 )
 
-DATA_PATH = ROOT / "data.json"
+ROOT = Path(__file__).resolve().parent.parent
+DATA_PATH = ROOT / "mass_transfer" / "resources" / "data" / "default_tie_lines.json"
 
 
 @pytest.fixture(scope="module")

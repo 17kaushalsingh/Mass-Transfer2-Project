@@ -1,18 +1,14 @@
 """Tests for the ML surrogate model."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from src.core.equilibrium import load_tie_line_data, fit_equilibrium_model
-from src.ml.data_generator import generate_crosscurrent_dataset_serial, DataGenConfig
-from src.ml.neural_net import (
+from mass_transfer.core.equilibrium import load_tie_line_data, fit_equilibrium_model
+from mass_transfer.ml.data_generator import generate_crosscurrent_dataset_serial, DataGenConfig
+from mass_transfer.ml.neural_net import (
     ExtractionANN,
     TrainingConfig,
     train_model,
@@ -20,9 +16,10 @@ from src.ml.neural_net import (
     save_model,
     load_model,
 )
-from src.ml.optimization import generate_response_surface, find_optimal_conditions
+from mass_transfer.ml.optimization import generate_response_surface, find_optimal_conditions
 
-DATA_PATH = ROOT / "data.json"
+ROOT = Path(__file__).resolve().parent.parent
+DATA_PATH = ROOT / "mass_transfer" / "resources" / "data" / "default_tie_lines.json"
 
 
 @pytest.fixture(scope="module")

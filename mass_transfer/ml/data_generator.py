@@ -10,6 +10,7 @@ from __future__ import annotations
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from importlib import resources
 from typing import Callable, Optional, Tuple
 
 import numpy as np
@@ -18,6 +19,11 @@ from scipy.stats.qmc import LatinHypercube
 
 from ..core.equilibrium import EquilibriumModel, load_tie_line_data, fit_equilibrium_model
 from ..core.crosscurrent import solve_crosscurrent
+
+
+DEFAULT_DATA_PATH = str(
+    resources.files("mass_transfer").joinpath("resources/data/default_tie_lines.json")
+)
 
 
 @dataclass
@@ -76,7 +82,7 @@ def _solve_single_point(args: tuple) -> Optional[dict]:
 def generate_crosscurrent_dataset(
     eq_model: EquilibriumModel,
     config: Optional[DataGenConfig] = None,
-    data_path: str = "data.json",
+    data_path: str = DEFAULT_DATA_PATH,
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> pd.DataFrame:
     """

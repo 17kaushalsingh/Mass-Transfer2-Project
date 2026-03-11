@@ -1,12 +1,13 @@
 """
 Main window for the Multistage Extraction Digital Twin GUI.
 
-Entry point: python -m src.gui.main_window
+Entry point: python -m mass_transfer.gui.main_window
 """
 
 from __future__ import annotations
 
 import sys
+from importlib import resources
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
@@ -29,7 +30,9 @@ from .comparison_tab import ComparisonTab
 from .animation_tab import AnimationTab
 
 
-DEFAULT_DATA_PATH = Path(__file__).resolve().parent.parent.parent / "data.json"
+DEFAULT_DATA_PATH = resources.files("mass_transfer").joinpath(
+    "resources/data/default_tie_lines.json"
+)
 
 
 class MainWindow(QMainWindow):

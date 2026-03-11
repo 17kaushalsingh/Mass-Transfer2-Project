@@ -1,18 +1,15 @@
 """Tests for the crosscurrent extraction solver."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from mass_transfer.core.equilibrium import load_tie_line_data, fit_equilibrium_model
+from mass_transfer.core.crosscurrent import solve_crosscurrent
+
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from src.core.equilibrium import load_tie_line_data, fit_equilibrium_model
-from src.core.crosscurrent import solve_crosscurrent
-
-DATA_PATH = ROOT / "data.json"
+DATA_PATH = ROOT / "mass_transfer" / "resources" / "data" / "default_tie_lines.json"
 
 
 @pytest.fixture(scope="module")
