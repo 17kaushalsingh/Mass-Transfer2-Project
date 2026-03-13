@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1320, 860)
 
         self.eq_model: EquilibriumModel | None = None
+        self.current_data_path: str | None = None
 
         self._setup_menu()
         self._setup_tabs()
@@ -108,7 +109,8 @@ class MainWindow(QMainWindow):
         try:
             tie_data = load_tie_line_data(filepath)
             self.eq_model = fit_equilibrium_model(tie_data)
-            self.data_tab.set_data(tie_data, self.eq_model)
+            self.current_data_path = filepath
+            self.data_tab.set_data(tie_data, self.eq_model, filepath)
             self.sim_tab.set_model(self.eq_model)
             self.surrogate_tab.set_model(self.eq_model, filepath)
             self.comparison_tab.set_model(self.eq_model)

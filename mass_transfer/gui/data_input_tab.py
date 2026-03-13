@@ -4,6 +4,7 @@ Data Input tab: table editor for tie-line data + equilibrium plot preview.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import Qt
@@ -38,6 +39,7 @@ class DataInputTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.eq_model: Optional[EquilibriumModel] = None
+        self.data_source_path: Optional[str] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -56,6 +58,11 @@ class DataInputTab(QWidget):
         intro.setProperty("class", "sectionIntro")
         left_panel.addWidget(intro)
 
+        self.source_label = QLabel("Active data source: bundled default dataset")
+        self.source_label.setWordWrap(True)
+        self.source_label.setProperty("class", "helperText")
+        left_panel.addWidget(self.source_label)
+
         table_group = QGroupBox("Tie-Line Data (wt%)")
         table_layout = QVBoxLayout(table_group)
 
@@ -66,6 +73,8 @@ class DataInputTab(QWidget):
         table_layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
+        self.upload_btn = QPushButton("Upload JSON")
+        self.upload_btn.clicked.connect(self._upload_json)
         self.add_btn = QPushButton("Add Row")
         self.add_btn.clicked.connect(self._add_row)
         self.remove_btn = QPushButton("Remove Row")
@@ -73,6 +82,7 @@ class DataInputTab(QWidget):
         self.fit_btn = QPushButton("Fit Model")
         self.fit_btn.setProperty("class", "primary")
         self.fit_btn.clicked.connect(self._fit_model)
+        btn_layout.addWidget(self.upload_btn)
         btn_layout.addWidget(self.add_btn)
         btn_layout.addWidget(self.remove_btn)
         btn_layout.addWidget(self.fit_btn)
@@ -100,9 +110,15 @@ class DataInputTab(QWidget):
         layout.addLayout(right_panel, stretch=2)
         self._draw_empty_state()
 
-    def set_data(self, tie_data: TieLineData, eq_model: EquilibriumModel):
+    def set_data(
+        self,
+        tie_data: TieLineData,
+        eq_model: EquilibriumModel,
+        data_source_path: Optional[str] = None,
+    ):
         """Populate the table and plots from loaded data."""
         self.eq_model = eq_model
+        self.data_source_path = data_source_path
         n = len(tie_data.A_raff)
         self.table.setRowCount(n)
 
@@ -116,8 +132,22 @@ class DataInputTab(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(i, j, item)
 
+        self._update_source_label()
         self._update_r2_display()
         self._update_plots()
+
+    def _update_source_label(self) -> None:
+        if self.data_source_path:
+            self.source_label.setText(
+                f"Active data source: {Path(self.data_source_path).name}"
+            )
+        else:
+            self.source_label.setText("Active data source: bundled default dataset")
+
+    def _upload_json(self) -> None:
+        main = self.window()
+        if hasattr(main, "_on_load"):
+            main._on_load()
 
     def _add_row(self):
         self.table.insertRow(self.table.rowCount())
@@ -175,8 +205,22 @@ class DataInputTab(QWidget):
             main = self.window()
             if hasattr(main, "eq_model"):
                 main.eq_model = self.eq_model
+                if hasattr(main, "data_tab"):
+                    main.data_tab.eq_model = self.eq_model
                 if hasattr(main, "sim_tab"):
                     main.sim_tab.set_model(self.eq_model)
+                if hasattr(main, "surrogate_tab"):
+                    data_path = getattr(main, "current_data_path", None)
+                    if data_path is None:
+                        data_path = self.data_source_path
+                    if data_path is None:
+                        data_path = getattr(main.surrogate_tab, "data_path", None)
+                    if data_path is not None:
+                        main.surrogate_tab.set_model(self.eq_model, data_path)
+                    else:
+                        main.surrogate_tab.set_model(self.eq_model)
+                if hasattr(main, "comparison_tab"):
+                    main.comparison_tab.set_model(self.eq_model)
 
             self._update_r2_display()
             self._update_plots()

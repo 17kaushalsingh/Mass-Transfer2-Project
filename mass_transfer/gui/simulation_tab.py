@@ -379,7 +379,7 @@ class SimulationTab(QWidget):
         draw_empty_figure(
             self.canvas.figure,
             "Stage Diagram",
-            "Run a simulation to see stage stepping and summary results for the selected extraction mode.",
+            "Run a simulation to see both the X-Y stepping view and the ternary process path for the selected extraction mode.",
         )
         self.canvas.draw()
 
@@ -452,7 +452,8 @@ class SimulationTab(QWidget):
     def _plot_crosscurrent(self, result):
         import numpy as np
         self.canvas.figure.clear()
-        ax = self.canvas.figure.add_subplot(111)
+        ax = self.canvas.figure.add_subplot(121)
+        ax_ternary = self.canvas.figure.add_subplot(122)
 
         data = self.eq_model.tie_line_data
         X_d = np.linspace(0, max(data.X)*1.05, 200)
@@ -478,6 +479,24 @@ class SimulationTab(QWidget):
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
+        self._draw_ternary_background(ax_ternary)
+        feed_B = getattr(result, "feed_B", max(0.0, 100.0 - result.feed_A - result.feed_C))
+        ax_ternary.plot(feed_B, result.feed_C, "gs", markersize=9, label="Feed")
+
+        raff_B = [s.B_raff for s in result.stages]
+        raff_C = [s.C_raff for s in result.stages]
+        ext_B = [s.B_ext for s in result.stages]
+        ext_C = [s.C_ext for s in result.stages]
+
+        for i, s in enumerate(result.stages, start=1):
+            ax_ternary.plot([s.B_raff, s.B_ext], [s.C_raff, s.C_ext], "k--", lw=0.9, alpha=0.6)
+            ax_ternary.annotate(f" {i}", (s.B_raff, s.C_raff), fontsize=8, color="#1f4e79")
+
+        ax_ternary.plot(raff_B, raff_C, "o-", color="#1f77b4", lw=1.8, ms=6, label="Raffinate path")
+        ax_ternary.plot(ext_B, ext_C, "s-", color="#d62728", lw=1.2, ms=5, alpha=0.85, label="Extract stages")
+        ax_ternary.set_title("Ternary Process Path")
+        ax_ternary.legend(fontsize=9, loc="best")
+
         self.canvas.figure.tight_layout()
         self.canvas.draw()
         animate_widget_in(self.canvas)
@@ -485,7 +504,8 @@ class SimulationTab(QWidget):
     def _plot_countercurrent(self, result):
         import numpy as np
         self.canvas.figure.clear()
-        ax = self.canvas.figure.add_subplot(111)
+        ax = self.canvas.figure.add_subplot(121)
+        ax_ternary = self.canvas.figure.add_subplot(122)
 
         data = self.eq_model.tie_line_data
         X_d = np.linspace(0, max(data.X)*1.05, 200)
@@ -511,6 +531,53 @@ class SimulationTab(QWidget):
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
+        self._draw_ternary_background(ax_ternary)
+
+        feed_B = max(0.0, 100.0 - self.feed_A_spin.value() - self.feed_C_spin.value())
+        ax_ternary.plot(feed_B, self.feed_C_spin.value(), "gs", markersize=9, label="Feed")
+
+        raff_B = [s.B_raff for s in result.stages]
+        raff_C = [s.C_raff for s in result.stages]
+        ext_B = [s.B_ext for s in result.stages]
+        ext_C = [s.C_ext for s in result.stages]
+
+        for s in result.stages:
+            color = "#ff7f0e" if getattr(s, "section", "") == "stripping" else "k"
+            ax_ternary.plot([s.B_raff, s.B_ext], [s.C_raff, s.C_ext], "--", color=color, lw=0.9, alpha=0.65)
+            ax_ternary.annotate(f" {s.stage_number}", (s.B_raff, s.C_raff), fontsize=8, color="#1f4e79")
+
+        ax_ternary.plot(raff_B, raff_C, "o-", color="#1f77b4", lw=1.8, ms=6, label="Raffinate path")
+        ax_ternary.plot(ext_B, ext_C, "s-", color="#d62728", lw=1.2, ms=5, alpha=0.85, label="Extract path")
+
+        if hasattr(result, "feed_stage") and result.feed_stage:
+            feed_idx = max(0, min(len(result.stages) - 1, result.feed_stage - 1))
+            fs = result.stages[feed_idx]
+            ax_ternary.plot(fs.B_raff, fs.C_raff, marker="*", color="gold", markersize=12, label="Feed stage")
+
+        ax_ternary.set_title("Ternary Process Path")
+        ax_ternary.legend(fontsize=9, loc="best")
+
         self.canvas.figure.tight_layout()
         self.canvas.draw()
         animate_widget_in(self.canvas)
+
+    def _draw_ternary_background(self, ax):
+        import numpy as np
+
+        data = self.eq_model.tie_line_data
+        B_raff_dense = np.linspace(min(data.B_raff), max(data.B_raff), 200)
+        C_raff_dense = [self.eq_model.C_raff_from_B(b) for b in B_raff_dense]
+        B_ext_dense = np.linspace(min(data.B_ext), max(data.B_ext), 200)
+        C_ext_dense = [self.eq_model.C_ext_from_B(b) for b in B_ext_dense]
+
+        ax.plot(B_raff_dense, C_raff_dense, "b-", lw=2, label="Raffinate envelope")
+        ax.plot(B_ext_dense, C_ext_dense, "r-", lw=2, label="Extract envelope")
+        ax.plot([0, 100], [0, 0], "k-", lw=1.5)
+        ax.plot([0, 0], [0, 100], "k-", lw=1.5)
+        ax.plot([100, 0], [0, 100], "k-", lw=1.5)
+        ax.set_xlim(-2, 105)
+        ax.set_ylim(-2, 105)
+        ax.set_xlabel("wt% B (Solvent)")
+        ax.set_ylabel("wt% C (Solute)")
+        ax.set_aspect("equal")
+        ax.grid(True, alpha=0.3)
