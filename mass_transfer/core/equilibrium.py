@@ -2,9 +2,9 @@
 Equilibrium model for ternary liquid-liquid extraction.
 
 Components:
-    A = Carrier (e.g., Cottonseed Oil)
-    B = Solvent (e.g., Propane)
-    C = Solute  (e.g., Oleic Acid)
+    A = Carrier
+    B = Solvent
+    C = Solute
 
 Ternary coordinates: wt% basis, right-angle triangle (x=A, y=C, B=100-A-C).
 Solvent-free basis:
@@ -21,8 +21,7 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 import numpy as np
-from numpy.polynomial import polynomial as P
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import PchipInterpolator
 from scipy.optimize import fsolve
 
 
@@ -50,35 +49,36 @@ class TieLineData:
 
 @dataclass
 class EquilibriumModel:
-    """Fitted equilibrium model with callable interpolation functions."""
+    """Fitted equilibrium model with robust interpolation."""
     tie_line_data: TieLineData
 
-    # Phase envelope on ternary triangle — A-axis fits (internal use)
+    # Property mappings as functions of X (solvent-free raffinate composition)
+    A_raff_from_X: Callable[[float], float] = field(repr=False)
+    C_raff_from_X: Callable[[float], float] = field(repr=False)
+    B_raff_from_X: Callable[[float], float] = field(repr=False)
+    
+    A_ext_from_X: Callable[[float], float] = field(repr=False)
+    C_ext_from_X: Callable[[float], float] = field(repr=False)
+    B_ext_from_X: Callable[[float], float] = field(repr=False)
+
+    # Legacy/Forward distribution curve
+    Y_from_X: Callable[[float], float] = field(repr=False)
+    N_raff_from_X: Callable[[float], float] = field(repr=False)
+    N_ext_from_Y: Callable[[float], float] = field(repr=False)
+    X_ext_from_X_raff: Callable[[float], float] = field(repr=False)
+
+    # Ternary boundary curves (for plotting)
     C_raff_from_A: Callable[[float], float] = field(repr=False)
     C_ext_from_A: Callable[[float], float] = field(repr=False)
-
-    # Phase envelope on ternary triangle — B-axis fits (for correct B-x-axis plot)
     C_raff_from_B: Callable[[float], float] = field(repr=False)
     C_ext_from_B: Callable[[float], float] = field(repr=False)
 
-    # Distribution curve
-    Y_from_X: Callable[[float], float] = field(repr=False)
-
-    # Solvent-ratio curves
-    N_raff_from_X: Callable[[float], float] = field(repr=False)
-    N_ext_from_Y: Callable[[float], float] = field(repr=False)
-
-    # Conjugate line
-    X_ext_from_X_raff: Callable[[float], float] = field(repr=False)
-
-    # R-squared values for diagnostics
-    r_squared: dict = field(default_factory=dict)
-
-    # Polynomial coefficients (numpy polyfit convention: highest degree first)
-    poly_coeffs: dict = field(default_factory=dict)
-
     # Plait point (where the two phases merge)
     plait_point: Optional[Tuple[float, float, float]] = None
+
+    # GUI Compatibility fields
+    r_squared: dict = field(default_factory=dict)
+    poly_coeffs: dict = field(default_factory=dict)
 
     # Bounds for valid interpolation
     X_range: Tuple[float, float] = (0.0, 1.0)
@@ -86,43 +86,40 @@ class EquilibriumModel:
 
     def X_from_Y(self, Y_val: float) -> float:
         """Inverse of Y_from_X via numerical root-finding."""
-        # Clamp Y to valid range
         Y_val = float(np.clip(Y_val, self.Y_range[0], self.Y_range[1]))
-        x0 = Y_val  # initial guess: X ≈ Y
-        sol = fsolve(lambda x: self.Y_from_X(float(x)) - Y_val, x0, full_output=True)
-        return float(sol[0][0])
+        idx = np.argmin(np.abs(self.tie_line_data.Y - Y_val))
+        x0 = float(self.tie_line_data.X[idx])
+        try:
+            sol = fsolve(lambda x: self.Y_from_X(float(x)) - Y_val, x0)
+            return float(sol[0])
+        except:
+            return x0
+
+    def get_raffinate_point(self, X: float) -> Tuple[float, float, float]:
+        X = float(np.clip(X, self.X_range[0], self.X_range[1]))
+        return (self.A_raff_from_X(X), self.C_raff_from_X(X), self.B_raff_from_X(X))
+
+    def get_extract_point(self, X: float) -> Tuple[float, float, float]:
+        X = float(np.clip(X, self.X_range[0], self.X_range[1]))
+        return (self.A_ext_from_X(X), self.C_ext_from_X(X), self.B_ext_from_X(X))
 
 
 # ---------------------------------------------------------------------------
-# Loading
+# Loading and Fitting
 # ---------------------------------------------------------------------------
 
 def load_tie_line_data(filepath: str | Path) -> TieLineData:
-    """
-    Load tie-line data from JSON and compute solvent-free coordinates.
-
-    Parameters
-    ----------
-    filepath : path to JSON with keys 'phase_1' (raffinate) and 'phase_2' (extract).
-        Each entry has 'cottonseed_oil', 'oleic_acid', 'propane' (or generic A/B/C).
-
-    Returns
-    -------
-    TieLineData with raw wt% and solvent-free coordinates.
-    """
     filepath = Path(filepath)
     with open(filepath, "r") as f:
         raw = json.load(f)
 
-    phase_1 = raw["phase_1"]  # raffinate
-    phase_2 = raw["phase_2"]  # extract
+    phase_1 = raw["phase_1"]
+    phase_2 = raw["phase_2"]
 
-    n = len(phase_1)
-    assert len(phase_2) == n, "phase_1 and phase_2 must have equal length"
-
-    # Detect key names — support both specific and generic
     sample = phase_1[0]
-    if "cottonseed_oil" in sample:
+    if "water" in sample:
+        key_A, key_C, key_B = "water", "acetic_acid", "isopropyl_ether"
+    elif "cottonseed_oil" in sample:
         key_A, key_C, key_B = "cottonseed_oil", "oleic_acid", "propane"
     elif "A" in sample:
         key_A, key_C, key_B = "A", "C", "B"
@@ -138,7 +135,6 @@ def load_tie_line_data(filepath: str | Path) -> TieLineData:
     C_ext = np.array([p[key_C] for p in phase_2], dtype=float)
     B_ext = np.array([p[key_B] for p in phase_2], dtype=float)
 
-    # Solvent-free coordinates
     AC_raff = A_raff + C_raff
     AC_ext = A_ext + C_ext
 
@@ -153,277 +149,89 @@ def load_tie_line_data(filepath: str | Path) -> TieLineData:
         X=X, Y=Y, N_raff=N_raff, N_ext=N_ext,
     )
 
-
-# ---------------------------------------------------------------------------
-# Fitting helpers
-# ---------------------------------------------------------------------------
-
-def _r_squared(y_actual: np.ndarray, y_predicted: np.ndarray) -> float:
-    """Compute coefficient of determination R²."""
-    ss_res = np.sum((y_actual - y_predicted) ** 2)
-    ss_tot = np.sum((y_actual - np.mean(y_actual)) ** 2)
-    if ss_tot == 0:
-        return 1.0
-    return 1.0 - ss_res / ss_tot
-
-
-def _fit_poly(x: np.ndarray, y: np.ndarray, degree: int) -> Tuple[Callable, float, np.ndarray]:
-    """
-    Fit polynomial y = f(x) using numpy.polyfit.
-
-    Returns (callable, R², coefficients_highest_first).
-    """
-    coeffs = np.polyfit(x, y, degree)
-    poly_func = np.poly1d(coeffs)
-    y_pred = poly_func(x)
-    r2 = _r_squared(y, y_pred)
-    return poly_func, r2, coeffs
-
-
-def _fit_cubic_spline(x: np.ndarray, y: np.ndarray) -> Tuple[Callable, float]:
-    """Fit a cubic spline (for narrow-range extract curve)."""
-    # Sort by x
+def _fit_interp(x: np.ndarray, y: np.ndarray) -> Callable[[float], float]:
     order = np.argsort(x)
     xs, ys = x[order], y[order]
-    cs = CubicSpline(xs, ys, bc_type="natural")
-    y_pred = cs(x)
-    r2 = _r_squared(y, y_pred)
-
+    if len(np.unique(xs)) < len(xs):
+        xs = xs + np.arange(len(xs)) * 1e-10
+    interp = PchipInterpolator(xs, ys, extrapolate=True)
     def wrapper(val):
-        return float(cs(val))
+        return float(interp(float(val)))
+    return wrapper
 
-    return wrapper, r2
+def fit_equilibrium_model(data: TieLineData) -> EquilibriumModel:
+    order = np.argsort(data.X)
+    X_sorted = data.X[order]
+    
+    A_raff_X = _fit_interp(X_sorted, data.A_raff[order])
+    C_raff_X = _fit_interp(X_sorted, data.C_raff[order])
+    B_raff_X = _fit_interp(X_sorted, data.B_raff[order])
+    
+    A_ext_X = _fit_interp(X_sorted, data.A_ext[order])
+    C_ext_X = _fit_interp(X_sorted, data.C_ext[order])
+    B_ext_X = _fit_interp(X_sorted, data.B_ext[order])
+    
+    Y_X = _fit_interp(X_sorted, data.Y[order])
+    N_R_X = _fit_interp(X_sorted, data.N_raff[order])
+    N_E_Y = _fit_interp(data.Y, data.N_ext)
 
+    C_R_A = _fit_interp(data.A_raff, data.C_raff)
+    C_R_B = _fit_interp(data.B_raff, data.C_raff)
+    C_E_A = _fit_interp(data.A_ext, data.C_ext)
+    C_E_B = _fit_interp(data.B_ext, data.C_ext)
 
-# ---------------------------------------------------------------------------
-# Main fitting function
-# ---------------------------------------------------------------------------
-
-def fit_equilibrium_model(data: TieLineData, raff_degree: int = 4,
-                          ext_degree: int = 3, dist_degree: int = 3,
-                          conj_degree: int = 2) -> EquilibriumModel:
-    """
-    Fit all equilibrium curves from tie-line data.
-
-    Parameters
-    ----------
-    data : TieLineData from load_tie_line_data
-    raff_degree : polynomial degree for raffinate curve C_raff(A)
-    ext_degree : polynomial degree for extract curve C_ext(A)
-    dist_degree : polynomial degree for distribution curve Y(X)
-    conj_degree : polynomial degree for conjugate line X_ext(X_raff)
-
-    Returns
-    -------
-    EquilibriumModel with all fitted callables.
-    """
-    r2 = {}
-    coeffs = {}
-
-    # --- Raffinate curve: C_raff = f(A_raff) on ternary triangle ---
-    C_raff_func, r2["C_raff_from_A"], coeffs["C_raff_from_A"] = _fit_poly(
-        data.A_raff, data.C_raff, raff_degree
-    )
-
-    # --- Extract curve: C_ext = f(A_ext) ---
-    # Extract phase has a narrow A range (0.2-2.3), use cubic spline for better fit
-    C_ext_func_spline, r2_spline = _fit_cubic_spline(data.A_ext, data.C_ext)
-    C_ext_func_poly, r2_poly, coeffs_ext = _fit_poly(data.A_ext, data.C_ext, ext_degree)
-
-    if r2_spline > r2_poly:
-        C_ext_func = C_ext_func_spline
-        r2["C_ext_from_A"] = r2_spline
-        coeffs["C_ext_from_A"] = None  # spline, no poly coeffs
-    else:
-        C_ext_func = C_ext_func_poly
-        r2["C_ext_from_A"] = r2_poly
-        coeffs["C_ext_from_A"] = coeffs_ext
-
-    # --- Distribution curve: Y = f(X) ---
-    Y_func, r2["Y_from_X"], coeffs["Y_from_X"] = _fit_poly(
-        data.X, data.Y, dist_degree
-    )
-
-    # --- Solvent-ratio curves ---
-    N_raff_func, r2["N_raff_from_X"], coeffs["N_raff_from_X"] = _fit_poly(
-        data.X, data.N_raff, 3
-    )
-    N_ext_func, r2["N_ext_from_Y"], coeffs["N_ext_from_Y"] = _fit_poly(
-        data.Y, data.N_ext, 3
-    )
-
-    # --- Conjugate line: X_ext = f(X_raff) ---
-    # X_ext ≈ Y (since X_ext = C_ext/(A_ext+C_ext) = Y in extract phase)
-    conj_func, r2["X_ext_from_X_raff"], coeffs["X_ext_from_X_raff"] = _fit_poly(
-        data.X, data.Y, conj_degree
-    )
-
-    # --- B-axis phase envelope fits: C = f(B) for correct ternary triangle ---
-    # Sort by B ascending for well-behaved fitting
-    raff_order = np.argsort(data.B_raff)
-    C_raff_from_B_func, r2["C_raff_from_B"], coeffs["C_raff_from_B"] = _fit_poly(
-        data.B_raff[raff_order], data.C_raff[raff_order], raff_degree
-    )
-
-    # Extract phase: use spline (narrow, non-monotone range)
-    ext_order = np.argsort(data.B_ext)
-    C_ext_from_B_spline, r2_ext_B_spline = _fit_cubic_spline(
-        data.B_ext[ext_order], data.C_ext[ext_order]
-    )
-    C_ext_from_B_poly, r2_ext_B_poly, coeffs_ext_B = _fit_poly(
-        data.B_ext[ext_order], data.C_ext[ext_order], ext_degree
-    )
-    if r2_ext_B_spline > r2_ext_B_poly:
-        C_ext_from_B_func = C_ext_from_B_spline
-        r2["C_ext_from_B"] = r2_ext_B_spline
-        coeffs["C_ext_from_B"] = None
-    else:
-        C_ext_from_B_func = C_ext_from_B_poly
-        r2["C_ext_from_B"] = r2_ext_B_poly
-        coeffs["C_ext_from_B"] = coeffs_ext_B
-
-    # Wrap numpy callables to accept scalar floats
-    def _wrap(func):
-        def wrapped(val):
-            return float(func(float(val)))
-        return wrapped
-
-    # Determine valid interpolation ranges
     X_range = (float(np.min(data.X)), float(np.max(data.X)))
     Y_range = (float(np.min(data.Y)), float(np.max(data.Y)))
 
-    # Estimate plait point (where raffinate and extract curves meet)
-    plait = _estimate_plait_point(data, C_raff_func, C_ext_func)
+    r2 = {"Y(X)": 1.0, "N_raff(X)": 1.0, "N_ext(Y)": 1.0}
 
-    model = EquilibriumModel(
-        tie_line_data=data,
-        C_raff_from_A=_wrap(C_raff_func),
-        C_ext_from_A=_wrap(C_ext_func) if callable(C_ext_func) else C_ext_func,
-        C_raff_from_B=_wrap(C_raff_from_B_func),
-        C_ext_from_B=C_ext_from_B_func if callable(C_ext_from_B_func) else _wrap(C_ext_from_B_func),
-        Y_from_X=_wrap(Y_func),
-        N_raff_from_X=_wrap(N_raff_func),
-        N_ext_from_Y=_wrap(N_ext_func),
-        X_ext_from_X_raff=_wrap(conj_func),
-        r_squared=r2,
-        poly_coeffs=coeffs,
-        plait_point=plait,
-        X_range=X_range,
-        Y_range=Y_range,
-    )
-    return model
-
-
-def _estimate_plait_point(data: TieLineData, C_raff_func, C_ext_func
-                          ) -> Optional[Tuple[float, float, float]]:
-    """Estimate the plait point where raffinate and extract curves meet."""
+    plait = None
     try:
-        # Find intersection of the two phase boundary curves
-        # At the plait point, the two phases become identical
-        # Use the last tie-line as an approximation (compositions converge)
-        A_range = np.linspace(0.1, max(data.A_raff), 500)
-        C_raff_vals = np.array([float(C_raff_func(a)) for a in A_range])
-        C_ext_vals = np.array([float(C_ext_func(a)) for a in A_range])
+        sep = (data.A_raff - data.A_ext)**2 + (data.C_raff - data.C_ext)**2
+        idx = np.argmin(sep)
+        if sep[idx] < 5.0:
+            plait = (float(data.A_raff[idx]), float(data.C_raff[idx]), float(data.B_raff[idx]))
+    except: pass
 
-        # Find where the curves cross
-        diff = C_raff_vals - C_ext_vals
-        sign_changes = np.where(np.diff(np.sign(diff)))[0]
-
-        if len(sign_changes) > 0:
-            idx = sign_changes[0]
-            A_plait = float(A_range[idx])
-            C_plait = float(C_raff_func(A_plait))
-            B_plait = 100.0 - A_plait - C_plait
-            return (A_plait, C_plait, B_plait)
-    except Exception:
-        pass
-    return None
-
+    return EquilibriumModel(
+        tie_line_data=data,
+        A_raff_from_X=A_raff_X, C_raff_from_X=C_raff_X, B_raff_from_X=B_raff_X,
+        A_ext_from_X=A_ext_X, C_ext_from_X=C_ext_X, B_ext_from_X=B_ext_X,
+        Y_from_X=Y_X, N_raff_from_X=N_R_X, N_ext_from_Y=N_E_Y,
+        X_ext_from_X_raff=Y_X,
+        C_raff_from_A=C_R_A, C_ext_from_A=C_E_A,
+        C_raff_from_B=C_R_B, C_ext_from_B=C_E_B,
+        X_range=X_range, Y_range=Y_range,
+        r_squared=r2,
+        plait_point=plait
+    )
 
 # ---------------------------------------------------------------------------
-# Convenience functions for getting full ternary point from solvent-free X or Y
+# Legacy helper functions
 # ---------------------------------------------------------------------------
 
 def get_raffinate_point_from_X(eq: EquilibriumModel, X: float) -> Tuple[float, float, float]:
-    """
-    Given solvent-free X = C/(A+C) in raffinate phase,
-    return the full ternary point (A, C, B) in wt%.
-
-    Solves the system:
-        C = C_raff_from_A(A)
-        C/(A+C) = X
-    """
-    X = float(X)
-
-    def equations(A_guess):
-        A = float(A_guess[0])
-        C = eq.C_raff_from_A(A)
-        if A + C <= 0:
-            return [1.0]
-        return [C / (A + C) - X]
-
-    # Initial guess: if X is small, A is large
-    A0 = max(0.1, (1.0 - X) * 60.0)
-    sol = fsolve(equations, [A0], full_output=True)
-    A_sol = float(sol[0][0])
-    C_sol = eq.C_raff_from_A(A_sol)
-    B_sol = 100.0 - A_sol - C_sol
-    return (A_sol, C_sol, B_sol)
-
+    return eq.get_raffinate_point(X)
 
 def get_extract_point_from_Y(eq: EquilibriumModel, Y: float) -> Tuple[float, float, float]:
-    """
-    Given solvent-free Y = C/(A+C) in extract phase,
-    return the full ternary point (A, C, B) in wt%.
-    """
-    Y = float(Y)
+    X = eq.X_from_Y(Y)
+    return eq.get_extract_point(X)
 
-    def equations(A_guess):
-        A = float(A_guess[0])
-        C = eq.C_ext_from_A(A)
-        if A + C <= 0:
-            return [1.0]
-        return [C / (A + C) - Y]
-
-    A0 = 1.0  # extract phase has very small A
-    sol = fsolve(equations, [A0], full_output=True)
-    A_sol = float(sol[0][0])
-    C_sol = eq.C_ext_from_A(A_sol)
-    B_sol = 100.0 - A_sol - C_sol
-    return (A_sol, C_sol, B_sol)
-
+def get_extract_point_from_X(eq: EquilibriumModel, X: float) -> Tuple[float, float, float]:
+    return eq.get_extract_point(X)
 
 def get_equilibrium_extract_from_raffinate(
     eq: EquilibriumModel, A_raff: float, C_raff: float
 ) -> Tuple[float, float, float]:
-    """
-    Given a raffinate composition (A, C in wt%), find the equilibrium
-    extract composition via the distribution curve.
-
-    Steps:
-        1. Compute X = C/(A+C) for the raffinate
-        2. Look up Y = Y_from_X(X)
-        3. Get extract point from Y
-    """
     AC = A_raff + C_raff
-    if AC <= 0:
-        return (0.0, 0.0, 100.0)  # pure solvent
+    if AC <= 0: return (0.0, 0.0, 100.0)
     X = C_raff / AC
-    Y = eq.Y_from_X(X)
-    return get_extract_point_from_Y(eq, Y)
-
+    return eq.get_extract_point(X)
 
 def get_N_from_ternary(A: float, C: float, B: float) -> float:
-    """Compute solvent ratio N = B/(A+C) from ternary wt%."""
     AC = A + C
-    if AC <= 0:
-        return float("inf")
-    return B / AC
-
+    return B / AC if AC > 0 else float("inf")
 
 def get_X_from_ternary(A: float, C: float) -> float:
-    """Compute solvent-free composition X = C/(A+C)."""
     AC = A + C
-    if AC <= 0:
-        return 0.0
-    return C / AC
+    return C / AC if AC > 0 else 0.0

@@ -186,17 +186,31 @@ class HeatmapTab(QWidget):
         stages = self.result.stages
         labels = [f"S{s.stage_number}" for s in stages]
 
+        # Calculate removal %
+        F_C = self.result.feed_flow_sf * self.result.X_feed
+        removals = []
+        for s in stages:
+            if F_C > 0:
+                R_C = s.R_flow * (s.C_raff / 100.0)
+                rem = max(0.0, min(100.0, 100.0 * (1.0 - R_C / F_C)))
+            else:
+                rem = 0.0
+            removals.append(rem)
+
         ax = self.canvas.figure.add_subplot(111)
         data = pd.DataFrame({
             "X_raff": [s.X_raff for s in stages],
             "Y_ext": [s.Y_ext for s in stages],
             "N_raff": [s.N_raff for s in stages],
             "N_ext": [s.N_ext for s in stages],
+            "R_flow (kg)": [s.R_flow for s in stages],
+            "E_flow (kg)": [s.E_flow for s in stages],
+            "% Removal": removals,
         }, index=labels).T
 
-        sns.heatmap(data, annot=True, fmt=".3f", cmap="YlOrRd",
+        sns.heatmap(data, annot=True, fmt=".2f", cmap="YlOrRd",
                     linewidths=0.5, ax=ax)
-        ax.set_title("Countercurrent Stage Compositions")
+        ax.set_title("Countercurrent Stage Properties")
         self.canvas.figure.tight_layout()
         self.canvas.draw()
         animate_widget_in(self.canvas)
