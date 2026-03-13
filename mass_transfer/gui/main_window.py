@@ -10,7 +10,6 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
@@ -26,7 +25,6 @@ from .data_input_tab import DataInputTab
 from .simulation_tab import SimulationTab
 from .surrogate_tab import SurrogateTab
 from .comparison_tab import ComparisonTab
-from .home_tab import HomeTab
 from .theme import apply_app_theme
 
 
@@ -49,9 +47,9 @@ class MainWindow(QMainWindow):
         self._setup_tabs()
         self._setup_statusbar()
 
-        # Auto-load default data while keeping Home as the opening tab.
+        # Auto-load default data and open directly into the working tabs.
         if DEFAULT_DATA_PATH.exists():
-            self._load_data(str(DEFAULT_DATA_PATH), switch_to_data_tab=False)
+            self._load_data(str(DEFAULT_DATA_PATH))
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -84,21 +82,11 @@ class MainWindow(QMainWindow):
         self.tabs.setMovable(False)
         self.setCentralWidget(self.tabs)
 
-        self.home_tab = HomeTab(self)
         self.data_tab = DataInputTab(self)
         self.sim_tab = SimulationTab(self)
         self.surrogate_tab = SurrogateTab(self)
         self.comparison_tab = ComparisonTab(self)
 
-        self.home_tab.load_default_btn.clicked.connect(self.load_default_data)
-        self.home_tab.open_sim_btn.clicked.connect(
-            lambda: self.switch_to_tab(self.sim_tab)
-        )
-        self.home_tab.open_surrogate_btn.clicked.connect(
-            lambda: self.switch_to_tab(self.surrogate_tab)
-        )
-
-        self.tabs.addTab(self.home_tab, "Home")
         self.tabs.addTab(self.data_tab, "Data Input")
         self.tabs.addTab(self.sim_tab, "Simulation")
         self.tabs.addTab(self.surrogate_tab, "Surrogate Model")
@@ -108,14 +96,6 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage("Ready. Default equilibrium data will load automatically.")
-
-    def switch_to_tab(self, tab_widget: QWidget) -> None:
-        index = self.tabs.indexOf(tab_widget)
-        if index >= 0:
-            self.tabs.setCurrentIndex(index)
-
-    def load_default_data(self) -> None:
-        self._load_data(str(DEFAULT_DATA_PATH), switch_to_data_tab=True)
 
     def _on_load(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -136,7 +116,7 @@ class MainWindow(QMainWindow):
                 f"Loaded {len(tie_data.A_raff)} tie-lines from {Path(filepath).name}"
             )
             if switch_to_data_tab:
-                self.switch_to_tab(self.data_tab)
+                self.tabs.setCurrentWidget(self.data_tab)
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Failed to load data:\n{e}")
 
