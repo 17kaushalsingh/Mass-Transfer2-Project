@@ -57,3 +57,22 @@ def animate_widget_in(widget, duration: int = 220) -> None:
     animation.setEasingCurve(QEasingCurve.Type.OutCubic)
     animation.start()
     widget._fade_animation = animation
+
+
+def countercurrent_removal_percentages(stages: list, x_feed: float) -> tuple[list[float], list[float]]:
+    """Return per-stage and cumulative removal (%) based on solvent-free X values."""
+    x_feed = max(float(x_feed), 0.0)
+    stage_removals: list[float] = []
+    cumulative_removals: list[float] = []
+    prev_x = x_feed
+    for s in stages:
+        if x_feed > 0:
+            stage_pct = 100.0 * (prev_x - s.X_raff) / x_feed
+            cumul_pct = 100.0 * (1.0 - s.X_raff / x_feed)
+        else:
+            stage_pct = 0.0
+            cumul_pct = 0.0
+        stage_removals.append(max(0.0, min(100.0, stage_pct)))
+        cumulative_removals.append(max(0.0, min(100.0, cumul_pct)))
+        prev_x = s.X_raff
+    return stage_removals, cumulative_removals

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
 from .animation_tab import AnimationTab
-from .ui_helpers import animate_widget_in, draw_empty_figure
+from .ui_helpers import animate_widget_in, countercurrent_removal_percentages, draw_empty_figure
 
 
 # ---------------------------------------------------------------------------
@@ -184,10 +184,14 @@ class ComparisonTab(QWidget):
         self.n_stages_spin.setRange(1, 50); self.n_stages_spin.setValue(3)
         self._op_layout.addRow("Stages:", self.n_stages_spin)
 
+        self.solvent_label = QLabel("Solvent input:")
         self.solvent_spin = QDoubleSpinBox()
         self.solvent_spin.setRange(1, 1_000_000); self.solvent_spin.setValue(1000.0)
         self.solvent_spin.setSuffix(" kg")
-        self._op_layout.addRow("Solvent/stage:", self.solvent_spin)
+        self.solvent_spin.setToolTip(
+            "Crosscurrent: solvent per stage. Countercurrent: total solvent flow rate."
+        )
+        self._op_layout.addRow(self.solvent_label, self.solvent_spin)
 
         left.addWidget(op_group)
 
@@ -538,7 +542,10 @@ class ComparisonTab(QWidget):
                     "Raffinate R (kg)": [s.R_flow for s in stages],
                     "Extract E (kg)":   [s.E_flow for s in stages],
                 }, index=labels).T
-            return None
+            return pd.DataFrame({
+                "Raffinate R (kg)": [s.R_flow for s in stages],
+                "Extract E (kg)":   [s.E_flow for s in stages],
+            }, index=labels).T
 
         def _make_removal_df():
             if is_cc:
@@ -546,7 +553,13 @@ class ComparisonTab(QWidget):
                     "Stage (%)":     [s.pct_removal_stage for s in stages],
                     "Cumulative (%)": [s.pct_removal_cumul for s in stages],
                 }, index=labels).T
-            return None
+            stage_removals, cumulative_removals = countercurrent_removal_percentages(
+                stages, getattr(result, "X_feed", 0.0)
+            )
+            return pd.DataFrame({
+                "Stage (%)": [float(v) for v in stage_removals],
+                "Cumulative (%)": [float(v) for v in cumulative_removals],
+            }, index=labels).T
 
         kwargs_base = dict(linewidths=0.5, linecolor="white")
 
@@ -558,24 +571,14 @@ class ComparisonTab(QWidget):
             ax_comp.set_title(f"{title_prefix}\nComposition", fontsize=9)
 
             df_f = _make_flow_df()
-            if df_f is not None:
-                sns.heatmap(df_f, annot=True, fmt=".1f", cmap="Blues", ax=ax_flow,
-                            cbar_kws={"label": "kg"}, **kwargs_base)
-                ax_flow.set_title("Flow Rates", fontsize=9)
-            else:
-                ax_flow.text(0.5, 0.5, "N/A (countercurrent)", ha="center", va="center",
-                             transform=ax_flow.transAxes)
-                ax_flow.set_title("Flow Rates", fontsize=9)
+            sns.heatmap(df_f, annot=True, fmt=".1f", cmap="Blues", ax=ax_flow,
+                        cbar_kws={"label": "kg"}, **kwargs_base)
+            ax_flow.set_title("Flow Rates", fontsize=9)
 
             df_r = _make_removal_df()
-            if df_r is not None:
-                sns.heatmap(df_r, annot=True, fmt=".2f", cmap="Greens", ax=ax_rem,
-                            cbar_kws={"label": "%"}, **kwargs_base)
-                ax_rem.set_title("% Removal", fontsize=9)
-            else:
-                ax_rem.text(0.5, 0.5, "N/A (countercurrent)", ha="center", va="center",
-                             transform=ax_rem.transAxes)
-                ax_rem.set_title("% Removal", fontsize=9)
+            sns.heatmap(df_r, annot=True, fmt=".2f", cmap="Greens", ax=ax_rem,
+                        cbar_kws={"label": "%"}, **kwargs_base)
+            ax_rem.set_title("% Removal", fontsize=9)
 
         elif hm_type == "composition":
             ax = axes_list[0]
@@ -586,26 +589,16 @@ class ComparisonTab(QWidget):
         elif hm_type == "flowrate":
             ax = axes_list[0]
             df_f = _make_flow_df()
-            if df_f is not None:
-                sns.heatmap(df_f, annot=True, fmt=".1f", cmap="Blues", ax=ax,
-                            cbar_kws={"label": "kg"}, **kwargs_base)
-                ax.set_title(f"{title_prefix}\nFlow Rates", fontsize=10)
-            else:
-                ax.text(0.5, 0.5, "Flow rates\nnot available\n(countercurrent)",
-                        ha="center", va="center", transform=ax.transAxes, fontsize=10)
-                ax.set_title(f"{title_prefix}", fontsize=10)
+            sns.heatmap(df_f, annot=True, fmt=".1f", cmap="Blues", ax=ax,
+                        cbar_kws={"label": "kg"}, **kwargs_base)
+            ax.set_title(f"{title_prefix}\nFlow Rates", fontsize=10)
 
         elif hm_type == "removal":
             ax = axes_list[0]
             df_r = _make_removal_df()
-            if df_r is not None:
-                sns.heatmap(df_r, annot=True, fmt=".2f", cmap="Greens", ax=ax,
-                            cbar_kws={"label": "%"}, **kwargs_base)
-                ax.set_title(f"{title_prefix}\n% Removal", fontsize=10)
-            else:
-                ax.text(0.5, 0.5, "Removal %\nnot available\n(countercurrent)",
-                        ha="center", va="center", transform=ax.transAxes, fontsize=10)
-                ax.set_title(f"{title_prefix}", fontsize=10)
+            sns.heatmap(df_r, annot=True, fmt=".2f", cmap="Greens", ax=ax,
+                        cbar_kws={"label": "%"}, **kwargs_base)
+            ax.set_title(f"{title_prefix}\n% Removal", fontsize=10)
 
     def _build_summary_table(self):
         """Populate the two-column summary comparison table."""
@@ -639,20 +632,32 @@ class ComparisonTab(QWidget):
                 # Countercurrent
                 first_s = stages[0]
                 last_s = stages[-1]
-                rows.append(("Raffinate X (Stage 1)", f"{first_s.X_raff:.4f}"))
-                rows.append(("Extract Y (Stage N)", f"{last_s.Y_ext:.4f}"))
-                # Estimate % removal
+
+                # Use the lead raffinate and terminal extract as the countercurrent
+                # analogs of the crosscurrent final/mixed outlet summaries.
                 X_feed = result.X_feed
                 X_raff = first_s.X_raff
+                pct = None
                 if X_feed > 0:
                     pct = (1 - X_raff / X_feed) * 100
-                    rows.append(("Est. % removal", f"{pct:.2f}%"))
+                    rows.append(("Total % removal", f"{pct:.2f}%"))
+
+                rows.append(("Final raffinate X (sf)", f"{first_s.X_raff:.4f}"))
+                rows.append(("Mixed extract Y (sf)", f"{last_s.Y_ext:.4f}"))
+                rows.append(("Mixed extract flow (kg)", f"{last_s.E_flow:.2f}"))
+                rows.append(("Mixed extract A wt%", f"{last_s.A_ext:.2f}%"))
+                rows.append(("Mixed extract C wt%", f"{last_s.C_ext:.2f}%"))
+                rows.append(("Mixed extract B wt%", f"{last_s.B_ext:.2f}%"))
                 rows.append(("SF feed flow (kg/h)", f"{result.feed_flow_sf:.2f}"))
-                # Per-stage breakdown
-                for s in stages:
+
+                stage_removals, cumulative_removals = countercurrent_removal_percentages(
+                    stages, result.X_feed
+                )
+                for s, stage_pct, cumul_pct in zip(stages, stage_removals, cumulative_removals):
+                    rows.append((f"  Stage {s.stage_number} removal", f"{stage_pct:.2f}%"))
+                    rows.append((f"  Stage {s.stage_number} cumul.", f"{cumul_pct:.2f}%"))
                     rows.append((f"  Stage {s.stage_number} X_raff", f"{s.X_raff:.4f}"))
                     rows.append((f"  Stage {s.stage_number} Y_ext", f"{s.Y_ext:.4f}"))
-                    rows.append((f"  Stage {s.stage_number} section", s.section))
             return rows
 
         rows_a = _extract_metrics(self._result_A, self.mode_A_combo.currentIndex())

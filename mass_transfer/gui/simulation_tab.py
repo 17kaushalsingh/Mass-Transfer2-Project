@@ -112,7 +112,7 @@ class SimulationTab(QWidget):
 
         self.feed_flow_spin = QDoubleSpinBox()
         self.feed_flow_spin.setRange(1, 100000); self.feed_flow_spin.setValue(100.0)
-        self.feed_flow_spin.setSuffix(" kg")
+        self.feed_flow_spin.setSuffix(" kg/h")
         feed_layout.addRow("Feed flow:", self.feed_flow_spin)
 
         left.addWidget(feed_group)
@@ -126,11 +126,12 @@ class SimulationTab(QWidget):
         self.n_stages_spin.setToolTip("Number of ideal extraction stages to calculate.")
         self.op_layout.addRow("Stages:", self.n_stages_spin)
 
+        self.solvent_label = QLabel("Solvent per stage:")
         self.solvent_spin = QDoubleSpinBox()
         self.solvent_spin.setRange(1, 100000); self.solvent_spin.setValue(1000.0)
         self.solvent_spin.setSuffix(" kg")
-        self.solvent_spin.setToolTip("Fresh solvent per stage for crosscurrent mode.")
-        self.op_layout.addRow("Solvent/stage:", self.solvent_spin)
+        self.solvent_spin.setToolTip("Crosscurrent: fresh solvent per stage. Countercurrent: total solvent flow.")
+        self.op_layout.addRow(self.solvent_label, self.solvent_spin)
 
         left.addWidget(op_group)
 
@@ -198,6 +199,7 @@ class SimulationTab(QWidget):
         right.addWidget(self.results_tabs)
 
         main_layout.addLayout(right, stretch=2)
+        self._on_mode_changed(self.mode_combo.currentIndex())
         self._draw_empty_state()
 
     def set_model(self, eq_model: EquilibriumModel):
@@ -235,20 +237,14 @@ class SimulationTab(QWidget):
             )
 
     def _on_mode_changed(self, index):
-        is_simple_cc = index == 1
-
-        if is_simple_cc:
-            self.solvent_spin.show()
-            self.n_stages_spin.show()
-            self.feed_flow_spin.setValue(1000.0)
+        if index == 1:
+            self.solvent_label.setText("Solvent flow:")
             self.solvent_spin.setSuffix(" kg/h")
-            self.feed_flow_spin.setSuffix(" kg/h")
+            self.solvent_spin.setToolTip("Countercurrent: total solvent flow rate.")
         else:
-            self.solvent_spin.show()
-            self.n_stages_spin.show()
-            self.feed_flow_spin.setValue(100.0)
+            self.solvent_label.setText("Solvent per stage:")
             self.solvent_spin.setSuffix(" kg")
-            self.feed_flow_spin.setSuffix(" kg")
+            self.solvent_spin.setToolTip("Crosscurrent: fresh solvent per stage.")
 
     def _run_solver(self):
         if self.eq_model is None:

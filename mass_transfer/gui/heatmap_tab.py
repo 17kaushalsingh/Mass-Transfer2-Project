@@ -23,7 +23,11 @@ from matplotlib.figure import Figure
 if TYPE_CHECKING:
     from ..core.equilibrium import EquilibriumModel
 
-from .ui_helpers import animate_widget_in, draw_empty_figure
+from .ui_helpers import (
+    animate_widget_in,
+    countercurrent_removal_percentages,
+    draw_empty_figure,
+)
 
 
 class HeatmapTab(QWidget):
@@ -154,7 +158,7 @@ class HeatmapTab(QWidget):
         # Check if result is crosscurrent (has R_flow attribute on stages)
         from ..core.crosscurrent import CrosscurrentResult
         if not isinstance(self.result, CrosscurrentResult):
-            self._show_countercurrent_heatmap()
+            self._show_countercurrent_heatmap(hmap_type)
             return
 
         self.canvas.figure.clear()
@@ -252,42 +256,90 @@ class HeatmapTab(QWidget):
 
         fig.tight_layout()
 
-    def _show_countercurrent_heatmap(self):
-        """Show a simple heatmap for countercurrent results."""
-        import numpy as np
+    def _show_countercurrent_heatmap(self, hmap_type: str):
+        """Render countercurrent heatmaps for the selected view type."""
         import pandas as pd
         import seaborn as sns
 
         self.canvas.figure.clear()
+        fig = self.canvas.figure
         stages = self.result.stages
         labels = [f"S{s.stage_number}" for s in stages]
 
-        # Calculate removal %
-        F_C = self.result.feed_flow_sf * self.result.X_feed
-        removals = []
-        for s in stages:
-            if F_C > 0:
-                R_C = s.R_flow * (s.C_raff / 100.0)
-                rem = max(0.0, min(100.0, 100.0 * (1.0 - R_C / F_C)))
-            else:
-                rem = 0.0
-            removals.append(rem)
+        X_feed = getattr(self.result, "X_feed", 0.0)
+        stage_removals, cumulative_removals = countercurrent_removal_percentages(
+            stages, X_feed
+        )
 
-        ax = self.canvas.figure.add_subplot(111)
-        data = pd.DataFrame({
-            "X_raff": [s.X_raff for s in stages],
-            "Y_ext": [s.Y_ext for s in stages],
-            "N_raff": [s.N_raff for s in stages],
-            "N_ext": [s.N_ext for s in stages],
-            "R_flow (kg)": [s.R_flow for s in stages],
-            "E_flow (kg)": [s.E_flow for s in stages],
-            "% Removal": removals,
-        }, index=labels).T
+        if hmap_type == "composition":
+            ax = fig.add_subplot(111)
+            data = pd.DataFrame({
+                "X_raff": [s.X_raff for s in stages],
+                "Y_ext": [s.Y_ext for s in stages],
+                "N_raff": [s.N_raff for s in stages],
+                "N_ext": [s.N_ext for s in stages],
+            }, index=labels).T
+            sns.heatmap(data, annot=True, fmt=".4f", cmap="YlOrRd",
+                        linewidths=0.5, ax=ax, cbar_kws={"label": "sf value"})
+            ax.set_title("Countercurrent Composition by Stage")
+            ax.set_ylabel("Metric")
+            ax.set_xlabel("Stage")
 
-        sns.heatmap(data, annot=True, fmt=".2f", cmap="YlOrRd",
-                    linewidths=0.5, ax=ax)
-        ax.set_title("Countercurrent Stage Properties")
-        self.canvas.figure.tight_layout()
+        elif hmap_type == "flowrate":
+            ax = fig.add_subplot(111)
+            data = pd.DataFrame({
+                "R_flow (kg)": [s.R_flow for s in stages],
+                "E_flow (kg)": [s.E_flow for s in stages],
+            }, index=labels).T
+            sns.heatmap(data, annot=True, fmt=".2f", cmap="Blues",
+                        linewidths=0.5, ax=ax, cbar_kws={"label": "kg"})
+            ax.set_title("Countercurrent Flow Rates by Stage")
+            ax.set_ylabel("Stream")
+            ax.set_xlabel("Stage")
+
+        elif hmap_type == "removal":
+            ax = fig.add_subplot(111)
+            data = pd.DataFrame({
+                "Stage Removal (%)": stage_removals,
+                "Cumulative Removal (%)": cumulative_removals,
+            }, index=labels).T
+            sns.heatmap(data, annot=True, fmt=".2f", cmap="Greens",
+                        linewidths=0.5, ax=ax, cbar_kws={"label": "%"})
+            ax.set_title("Countercurrent Removal by Stage")
+            ax.set_ylabel("Metric")
+            ax.set_xlabel("Stage")
+
+        else:
+            axes = fig.subplots(3, 1)
+
+            comp_data = pd.DataFrame({
+                "X_raff": [s.X_raff for s in stages],
+                "Y_ext": [s.Y_ext for s in stages],
+                "N_raff": [s.N_raff for s in stages],
+                "N_ext": [s.N_ext for s in stages],
+            }, index=labels).T
+            sns.heatmap(comp_data, annot=True, fmt=".4f", cmap="YlOrRd",
+                        linewidths=0.5, ax=axes[0], cbar_kws={"label": "sf value"})
+            axes[0].set_title("Composition", fontsize=12)
+
+            flow_data = pd.DataFrame({
+                "R_flow (kg)": [s.R_flow for s in stages],
+                "E_flow (kg)": [s.E_flow for s in stages],
+            }, index=labels).T
+            sns.heatmap(flow_data, annot=True, fmt=".2f", cmap="Blues",
+                        linewidths=0.5, ax=axes[1], cbar_kws={"label": "kg"})
+            axes[1].set_title("Flow Rates", fontsize=12)
+
+            removal_data = pd.DataFrame({
+                "Stage Removal (%)": stage_removals,
+                "Cumulative Removal (%)": cumulative_removals,
+            }, index=labels).T
+            sns.heatmap(removal_data, annot=True, fmt=".2f", cmap="Greens",
+                        linewidths=0.5, ax=axes[2], cbar_kws={"label": "%"})
+            axes[2].set_title("Removal", fontsize=12)
+            fig.suptitle("Countercurrent Stage Summary", fontsize=16)
+
+        fig.tight_layout()
         self._refresh_canvas()
         animate_widget_in(self.canvas)
 
@@ -315,12 +367,6 @@ class HeatmapTab(QWidget):
         """Line charts: concentration and flow rate profiles vs stage."""
         if self.result is None:
             QMessageBox.information(self, "No Data", "Run a simulation first.")
-            return
-
-        from ..core.crosscurrent import CrosscurrentResult
-        if not isinstance(self.result, CrosscurrentResult):
-            QMessageBox.information(self, "Info",
-                "Profile charts are currently available for crosscurrent results.")
             return
 
         self._uncheck_all()
@@ -359,18 +405,11 @@ class HeatmapTab(QWidget):
         fig.tight_layout()
         self._refresh_canvas()
         animate_widget_in(self.canvas)
-        animate_widget_in(self.canvas)
 
     def _show_raff_vs_ext(self):
         """Grouped bar chart: raffinate vs extract compositions at each stage."""
         if self.result is None:
             QMessageBox.information(self, "No Data", "Run a simulation first.")
-            return
-
-        from ..core.crosscurrent import CrosscurrentResult
-        if not isinstance(self.result, CrosscurrentResult):
-            QMessageBox.information(self, "Info",
-                "Raffinate vs Extract chart is currently available for crosscurrent results.")
             return
 
         self._uncheck_all()
@@ -417,19 +456,17 @@ class HeatmapTab(QWidget):
             QMessageBox.information(self, "No Data", "Run a simulation first.")
             return
 
-        from ..core.crosscurrent import CrosscurrentResult
-        if not isinstance(self.result, CrosscurrentResult):
-            QMessageBox.information(self, "Info",
-                "Removal curve is currently available for crosscurrent results.")
-            return
-
         self._uncheck_all()
         self.removal_curve_btn.setChecked(True)
 
         stages = self.result.stages
         x = [s.stage_number for s in stages]
-        per_stage = [s.pct_removal_stage for s in stages]
-        cumulative = [s.pct_removal_cumul for s in stages]
+        from ..core.crosscurrent import CrosscurrentResult
+        if isinstance(self.result, CrosscurrentResult):
+            per_stage = [s.pct_removal_stage for s in stages]
+            cumulative = [s.pct_removal_cumul for s in stages]
+        else:
+            per_stage, cumulative = countercurrent_removal_percentages(stages, getattr(self.result, "X_feed", 0.0))
 
         self.canvas.figure.clear()
         fig = self.canvas.figure
