@@ -161,8 +161,7 @@ class AnimationTab(QWidget):
         left.setSpacing(12)
 
         intro = QLabel(
-            "Generate one animation view for the current solver context. "
-            "Use the type selector to switch between stage, ternary, profile, and sweep views."
+            "Generate an animation for the current solver context and switch between stage, ternary, profile, and sweep views as needed."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
@@ -179,7 +178,7 @@ class AnimationTab(QWidget):
 
         source_group = QGroupBox("Animation Source")
         source_layout = QVBoxLayout(source_group)
-        source_label = QLabel("This animation panel is bound to the active solver context.")
+        source_label = QLabel("This panel always uses the active solver context.")
         source_label.setWordWrap(True)
         source_label.setProperty("class", "helperText")
         source_layout.addWidget(source_label)
@@ -251,7 +250,7 @@ class AnimationTab(QWidget):
         self.progress = QProgressBar()
         left.addWidget(self.progress)
 
-        self.status_label = QLabel("Generate an animation for the current solver context.")
+        self.status_label = QLabel("Generate an animation for the active case.")
         self.status_label.setProperty("class", "statusCard")
         self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
@@ -284,7 +283,7 @@ class AnimationTab(QWidget):
 
     def set_result(self, result):
         self._last_result = result
-        self.status_label.setText("Current result ready. Generate an animation for this solver context.")
+        self.status_label.setText("Results ready. Generate an animation for this case.")
 
     def set_solver_factory(self, solver_factory: Callable[[], tuple]) -> None:
         self._solver_factory = solver_factory
@@ -293,7 +292,7 @@ class AnimationTab(QWidget):
         draw_empty_figure(
             self.canvas.figure,
             "Animation Preview",
-            "Generate an animation to preview stage motion, composition evolution, or a parameter sweep here.",
+            "Generate an animation to preview stage motion, composition trends, or a parameter sweep.",
         )
         self.canvas.draw()
 
@@ -312,7 +311,7 @@ class AnimationTab(QWidget):
         self.progress.setValue(0)
 
         if self._solver_factory is not None:
-            self.status_label.setText("Running the current solver context before animation generation…")
+            self.status_label.setText("Running the current case before generating the animation…")
             try:
                 solver_func, kwargs = self._solver_factory()
             except Exception as e:
@@ -331,7 +330,7 @@ class AnimationTab(QWidget):
             QMessageBox.information(
                 self,
                 "No Result",
-                "Run the current solver context first so an animation can be generated.",
+                "Run the current case first so an animation can be generated.",
             )
             return
 

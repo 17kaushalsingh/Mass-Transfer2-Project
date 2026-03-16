@@ -41,8 +41,7 @@ class HeatmapTab(QWidget):
         self.setMinimumSize(1180, 980)
 
         intro = QLabel(
-            "Step 3: once a simulation has run, use these views to inspect stage-wise composition, "
-            "flow trends, and removal performance."
+            "Use these views to inspect stage-wise compositions, flow trends, and removal performance from the current simulation."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
@@ -105,7 +104,7 @@ class HeatmapTab(QWidget):
         self.canvas.setMinimumSize(1120, 820)
         layout.addWidget(self.canvas)
 
-        self.info_label = QLabel("Run a simulation first to unlock the heatmaps and profile views.")
+        self.info_label = QLabel("Run a simulation to unlock the heatmaps and profile views.")
         self.info_label.setProperty("class", "statusCard")
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
@@ -116,14 +115,14 @@ class HeatmapTab(QWidget):
 
     def set_result(self, result):
         self.result = result
-        self.info_label.setText("Simulation results received. Choose a heatmap or profile view.")
+        self.info_label.setText("Results loaded. Choose a heatmap or profile view.")
         self._show_heatmap("combined")
 
     def _draw_empty_state(self):
         draw_empty_figure(
             self.canvas.figure,
             "Heatmaps and Profiles",
-            "Run a simulation in the Simulation tab to populate stage-wise composition, flow, and removal views.",
+            "Run a simulation to populate the stage-wise heatmaps and profile views.",
         )
         self.canvas.draw()
 

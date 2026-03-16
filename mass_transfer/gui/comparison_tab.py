@@ -68,17 +68,11 @@ class _ComparisonWorker(QThread):
 
 MODE_NAMES = [
     "Crosscurrent",
-    "Countercurrent (Simple)",
-    "Countercurrent (Reflux)",
+    "Countercurrent",
 ]
 
-
-def _needs_reflux(*modes) -> bool:
-    return any(m == 2 for m in modes)
-
-
 def _build_solver(mode_idx: int, eq_model, *, feed_A, feed_C, feed_flow,
-                  solvent, n_stages, reflux_ratio, x_raff, x_ext):
+                  solvent, n_stages):
     """Return (solver_func, kwargs) for the given mode index."""
     if mode_idx == 0:
         from ..core.crosscurrent import solve_crosscurrent
@@ -87,17 +81,10 @@ def _build_solver(mode_idx: int, eq_model, *, feed_A, feed_C, feed_flow,
             solvent_per_stage=solvent, n_stages=n_stages, eq_model=eq_model,
         )
     elif mode_idx == 1:
-        from ..core.countercurrent import solve_countercurrent_simple
-        return solve_countercurrent_simple, dict(
+        from ..core.countercurrent import solve_countercurrent
+        return solve_countercurrent, dict(
             feed_A=feed_A, feed_C=feed_C, feed_flow=feed_flow,
             solvent_flow=solvent, n_stages=n_stages, eq_model=eq_model,
-        )
-    else:
-        from ..core.countercurrent import solve_countercurrent_reflux
-        return solve_countercurrent_reflux, dict(
-            feed_A=feed_A, feed_C=feed_C, feed_flow=feed_flow,
-            reflux_ratio=reflux_ratio, X_raff_spec=x_raff,
-            X_ext_spec=x_ext, eq_model=eq_model,
         )
 
 
@@ -134,8 +121,7 @@ class ComparisonTab(QWidget):
         left.setSpacing(6)
 
         intro = QLabel(
-            "Step 5: compare two extraction strategies side by side using the same feed "
-            "conditions so stage diagrams, heatmaps, and summary metrics stay directly comparable."
+            "Run two extraction modes with the same feed and operating inputs to compare their stage behavior, heatmaps, and summary metrics side by side."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
@@ -143,19 +129,29 @@ class ComparisonTab(QWidget):
 
         # Mode selectors
         mode_group = QGroupBox("Modes to Compare")
-        mg_layout = QFormLayout(mode_group)
+        mg_layout = QHBoxLayout(mode_group)
+        mg_layout.setSpacing(12)
 
+        mode_a_col = QVBoxLayout()
+        mode_a_label = QLabel("Mode A")
+        mode_a_label.setProperty("class", "helperText")
         self.mode_A_combo = QComboBox()
         self.mode_A_combo.addItems(MODE_NAMES)
         self.mode_A_combo.setCurrentIndex(0)
-        self.mode_A_combo.currentIndexChanged.connect(self._on_mode_changed)
-        mg_layout.addRow("Mode A:", self.mode_A_combo)
+        mode_a_col.addWidget(mode_a_label)
+        mode_a_col.addWidget(self.mode_A_combo)
 
+        mode_b_col = QVBoxLayout()
+        mode_b_label = QLabel("Mode B")
+        mode_b_label.setProperty("class", "helperText")
         self.mode_B_combo = QComboBox()
         self.mode_B_combo.addItems(MODE_NAMES)
         self.mode_B_combo.setCurrentIndex(1)
-        self.mode_B_combo.currentIndexChanged.connect(self._on_mode_changed)
-        mg_layout.addRow("Mode B:", self.mode_B_combo)
+        mode_b_col.addWidget(mode_b_label)
+        mode_b_col.addWidget(self.mode_B_combo)
+
+        mg_layout.addLayout(mode_a_col)
+        mg_layout.addLayout(mode_b_col)
 
         left.addWidget(mode_group)
 
@@ -193,30 +189,6 @@ class ComparisonTab(QWidget):
         self.solvent_spin.setSuffix(" kg")
         self._op_layout.addRow("Solvent/stage:", self.solvent_spin)
 
-        # Reflux-specific (hidden until needed)
-        self.reflux_spin = QDoubleSpinBox()
-        self.reflux_spin.setRange(0.1, 100); self.reflux_spin.setValue(4.5)
-        self.reflux_label = QLabel("Reflux ratio:")
-
-        self.x_raff_spin = QDoubleSpinBox()
-        self.x_raff_spin.setRange(0.001, 0.99); self.x_raff_spin.setValue(0.02)
-        self.x_raff_spin.setDecimals(3)
-        self.x_raff_label = QLabel("X_raff spec (sf):")
-
-        self.x_ext_spin = QDoubleSpinBox()
-        self.x_ext_spin.setRange(0.01, 0.99); self.x_ext_spin.setValue(0.90)
-        self.x_ext_spin.setDecimals(3)
-        self.x_ext_label = QLabel("X_ext spec (sf):")
-
-        self._reflux_rows = [
-            (self.reflux_label, self.reflux_spin),
-            (self.x_raff_label, self.x_raff_spin),
-            (self.x_ext_label, self.x_ext_spin),
-        ]
-        for lbl, wid in self._reflux_rows:
-            self._op_layout.addRow(lbl, wid)
-            lbl.hide(); wid.hide()
-
         left.addWidget(op_group)
 
         # Run button
@@ -226,7 +198,7 @@ class ComparisonTab(QWidget):
         self.run_btn.clicked.connect(self._run_comparison)
         left.addWidget(self.run_btn)
 
-        self.status_label = QLabel("Choose two modes and run a side-by-side comparison.")
+        self.status_label = QLabel("Choose two modes and run the comparison.")
         self.status_label.setProperty("class", "statusCard")
         self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
@@ -311,7 +283,7 @@ class ComparisonTab(QWidget):
         self.eq_model = eq_model
         if self.animation_tab is not None:
             self.animation_tab.set_model(eq_model)
-        self.status_label.setText("Equilibrium model ready. Compare any two extraction modes.")
+        self.status_label.setText("Equilibrium model ready. Pick two modes and compare them.")
 
     def _on_animation_target_changed(self, index: int):
         if self.animation_tab is None:
@@ -335,25 +307,8 @@ class ComparisonTab(QWidget):
             feed_flow=self.feed_flow_spin.value(),
             solvent=self.solvent_spin.value(),
             n_stages=self.n_stages_spin.value(),
-            reflux_ratio=self.reflux_spin.value(),
-            x_raff=self.x_raff_spin.value(),
-            x_ext=self.x_ext_spin.value(),
         )
         return solver_func, kwargs
-
-    # ------------------------------------------------------------------
-    # Mode change handler
-    # ------------------------------------------------------------------
-
-    def _on_mode_changed(self):
-        idx_a = self.mode_A_combo.currentIndex()
-        idx_b = self.mode_B_combo.currentIndex()
-        needs_reflux = _needs_reflux(idx_a, idx_b)
-        for lbl, wid in self._reflux_rows:
-            if needs_reflux:
-                lbl.show(); wid.show()
-            else:
-                lbl.hide(); wid.hide()
 
     # ------------------------------------------------------------------
     # Running solvers
@@ -365,7 +320,7 @@ class ComparisonTab(QWidget):
             return
 
         self.run_btn.setEnabled(False)
-        self.status_label.setText("Solving Mode A and Mode B…")
+        self.status_label.setText("Running both comparison cases…")
         self._result_A = None
         self._result_B = None
         self._workers_done = 0
@@ -376,9 +331,6 @@ class ComparisonTab(QWidget):
         feed_flow = self.feed_flow_spin.value()
         solvent = self.solvent_spin.value()
         n_stages = self.n_stages_spin.value()
-        reflux_ratio = self.reflux_spin.value()
-        x_raff = self.x_raff_spin.value()
-        x_ext = self.x_ext_spin.value()
 
         idx_a = self.mode_A_combo.currentIndex()
         idx_b = self.mode_B_combo.currentIndex()
@@ -387,13 +339,11 @@ class ComparisonTab(QWidget):
             idx_a, self.eq_model,
             feed_A=feed_A, feed_C=feed_C, feed_flow=feed_flow,
             solvent=solvent, n_stages=n_stages,
-            reflux_ratio=reflux_ratio, x_raff=x_raff, x_ext=x_ext,
         )
         func_b, kw_b = _build_solver(
             idx_b, self.eq_model,
             feed_A=feed_A, feed_C=feed_C, feed_flow=feed_flow,
             solvent=solvent, n_stages=n_stages,
-            reflux_ratio=reflux_ratio, x_raff=x_raff, x_ext=x_ext,
         )
 
         self._worker_A = _ComparisonWorker(func_a, kw_a)
@@ -697,18 +647,7 @@ class ComparisonTab(QWidget):
                 if X_feed > 0:
                     pct = (1 - X_raff / X_feed) * 100
                     rows.append(("Est. % removal", f"{pct:.2f}%"))
-                rows.append(("Feed stage", str(result.feed_stage)))
                 rows.append(("SF feed flow (kg/h)", f"{result.feed_flow_sf:.2f}"))
-                if result.reflux_ratio is not None:
-                    rows.append(("Reflux ratio", f"{result.reflux_ratio:.3f}"))
-                if result.min_reflux_ratio is not None:
-                    rows.append(("Min reflux ratio", f"{result.min_reflux_ratio:.3f}"))
-                if result.min_stages is not None:
-                    rows.append(("Min stages (total reflux)", str(result.min_stages)))
-                if result.delta_E is not None:
-                    rows.append(("Δ_E (X, N)", f"({result.delta_E[0]:.4f}, {result.delta_E[1]:.4f})"))
-                if result.delta_S is not None:
-                    rows.append(("Δ_S (X, N)", f"({result.delta_S[0]:.4f}, {result.delta_S[1]:.4f})"))
                 # Per-stage breakdown
                 for s in stages:
                     rows.append((f"  Stage {s.stage_number} X_raff", f"{s.X_raff:.4f}"))
@@ -758,13 +697,13 @@ class ComparisonTab(QWidget):
         draw_empty_figure(
             self.stage_canvas.figure,
             "Comparison Stage View",
-            "Select two modes above and run the comparison to populate both stage diagrams.",
+            "Run a comparison to populate both stage diagrams.",
         )
         self.stage_canvas.draw()
         draw_empty_figure(
             self.heatmap_canvas.figure,
             "Comparison Heatmaps",
-            "The heatmap notebook fills after both solvers finish, letting you inspect composition, flow, and removal together.",
+            "Run a comparison to populate the side-by-side heatmaps and summary views.",
         )
         self.heatmap_canvas.draw()
 
@@ -772,8 +711,8 @@ class ComparisonTab(QWidget):
         self.summary_table.setHorizontalHeaderLabels(["Metric", "Mode A", "Mode B"])
         self.summary_table.setRowCount(1)
         self.summary_table.setItem(0, 0, QTableWidgetItem("Status"))
-        self.summary_table.setItem(0, 1, QTableWidgetItem("Awaiting run"))
-        self.summary_table.setItem(0, 2, QTableWidgetItem("Awaiting run"))
+        self.summary_table.setItem(0, 1, QTableWidgetItem("Waiting"))
+        self.summary_table.setItem(0, 2, QTableWidgetItem("Waiting"))
 
     def _export(self, canvas: FigureCanvas):
         filepath, _ = QFileDialog.getSaveFileName(

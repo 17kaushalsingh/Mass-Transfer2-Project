@@ -211,7 +211,7 @@ The file fits:
 
 These are needed because the stage solvers often work with solvent-free compositions and later need to know how much solvent is associated with the phase at that composition.
 
-These curves are especially important in the countercurrent reflux formulation, where the `N-(X/Y)` diagram and difference-point construction are used.
+These curves are especially important in the countercurrent solver, where solvent-free operating geometry and stage stepping depend on phase solvent loading.
 
 ### 8.5 Conjugate-Line Approximation
 

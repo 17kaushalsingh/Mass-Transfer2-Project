@@ -204,8 +204,7 @@ class SurrogateTab(QWidget):
         left.setSpacing(12)
 
         intro = QLabel(
-            "Step 4: generate operating data, train the surrogate, and then use the same "
-            "workspace for prediction, optimization, and solver-vs-model comparison."
+            "Generate operating data, train the surrogate, and then use the trained model for prediction, optimization, and solver comparison."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
@@ -222,8 +221,7 @@ class SurrogateTab(QWidget):
         setup_layout.setSpacing(12)
 
         setup_hint = QLabel(
-            "Default workflow: first generate a dataset, then train the surrogate. "
-            "Use the other subtabs for prediction, optimization, and solver comparison."
+            "Start by generating a dataset, then train the surrogate. Use the other subtabs for prediction, optimization, and solver comparison."
         )
         setup_hint.setWordWrap(True)
         setup_hint.setProperty("class", "helperText")
@@ -247,7 +245,7 @@ class SurrogateTab(QWidget):
         self.gen_progress = QProgressBar()
         gen_layout.addRow(self.gen_progress)
 
-        self.gen_info = QLabel("Generate a dataset to begin the surrogate workflow.")
+        self.gen_info = QLabel("Generate a dataset to begin.")
         self.gen_info.setProperty("class", "statusCard")
         self.gen_info.setWordWrap(True)
         gen_layout.addRow(self.gen_info)
@@ -404,7 +402,7 @@ class SurrogateTab(QWidget):
         self.cmp_progress = QProgressBar()
         cmp_layout.addRow(self.cmp_progress)
 
-        self.cmp_info = QLabel("Train the model first, then compare its predictions against fresh solver evaluations.")
+        self.cmp_info = QLabel("Train the model first, then compare its predictions against new solver evaluations.")
         self.cmp_info.setProperty("class", "statusCard")
         self.cmp_info.setWordWrap(True)
         cmp_layout.addRow(self.cmp_info)
@@ -463,13 +461,13 @@ class SurrogateTab(QWidget):
     def set_model(self, eq_model: EquilibriumModel, data_path: str = DEFAULT_DATA_PATH):
         self.eq_model = eq_model
         self.data_path = data_path
-        self.gen_info.setText("Equilibrium model ready. Generate data to start the surrogate workflow.")
+        self.gen_info.setText("Equilibrium model ready. Generate data to start.")
 
     def _draw_empty_state(self):
         draw_empty_figure(
             self.canvas.figure,
             "Surrogate Workspace",
-            "Generate data and train a model to fill this area with loss curves, data split visuals, response surfaces, and solver comparisons.",
+            "Generate data and train a model to populate this workspace with losses, response surfaces, and comparison plots.",
         )
         self.canvas.draw()
 

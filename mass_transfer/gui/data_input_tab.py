@@ -51,14 +51,13 @@ class DataInputTab(QWidget):
         left_panel.setSpacing(12)
 
         intro = QLabel(
-            "Step 1: review the tie-line dataset, then refit the equilibrium model if you "
-            "edit any values. The phase envelope and distribution plot update together."
+            "Load a tie-line dataset, review the phase compositions, and refit the equilibrium model after any table edits."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
         left_panel.addWidget(intro)
 
-        self.source_label = QLabel("Active data source: bundled default dataset")
+        self.source_label = QLabel("Active dataset: bundled default data")
         self.source_label.setWordWrap(True)
         self.source_label.setProperty("class", "helperText")
         left_panel.addWidget(self.source_label)
@@ -91,7 +90,7 @@ class DataInputTab(QWidget):
         left_panel.addWidget(table_group)
 
         # R² display
-        self.r2_label = QLabel("R² values will appear after fitting.")
+        self.r2_label = QLabel("Fit diagnostics appear here after the model is updated.")
         self.r2_label.setWordWrap(True)
         self.r2_label.setProperty("class", "metricCard")
         left_panel.addWidget(self.r2_label)
@@ -142,7 +141,7 @@ class DataInputTab(QWidget):
                 f"Active data source: {Path(self.data_source_path).name}"
             )
         else:
-            self.source_label.setText("Active data source: bundled default dataset")
+            self.source_label.setText("Active dataset: bundled default data")
 
     def _upload_json(self) -> None:
         main = self.window()
@@ -242,7 +241,7 @@ class DataInputTab(QWidget):
         draw_empty_figure(
             self.canvas.figure,
             "Equilibrium Preview",
-            "Load or fit tie-line data to preview the phase envelope and the X-Y distribution diagram.",
+            "Load a dataset or refit the table to preview the phase envelope and distribution curve.",
         )
         self.canvas.draw()
 

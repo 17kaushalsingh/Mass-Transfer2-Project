@@ -90,13 +90,13 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(self.data_tab, "Data Input")
         self.tabs.addTab(self.sim_tab, "Simulation")
-        self.tabs.addTab(self.surrogate_tab, "Surrogate Model")
         self.tabs.addTab(self.comparison_tab, "⚖ Comparison")
+        self.tabs.addTab(self.surrogate_tab, "Surrogate Model")
 
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
-        self.statusbar.showMessage("Ready. Default equilibrium data will load automatically.")
+        self.statusbar.showMessage("Ready. The default equilibrium dataset loads automatically.")
 
     def _on_load(self):
         filepath, _ = QFileDialog.getOpenFileName(

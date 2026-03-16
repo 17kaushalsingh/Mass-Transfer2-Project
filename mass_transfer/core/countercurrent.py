@@ -39,18 +39,14 @@ class CountercurrentStage:
     B_ext: float    # wt% B in extract
     R_flow: float = 0.0
     E_flow: float = 0.0
-    section: str = "simple"
+    section: str = "countercurrent"
 
 
 @dataclass
 class CountercurrentResult:
     """Complete countercurrent extraction results."""
     n_stages: int
-    feed_stage: int
     stages: List[CountercurrentStage] = field(default_factory=list)
-    reflux_ratio: Optional[float] = None
-    min_reflux_ratio: Optional[float] = None
-    min_stages: Optional[int] = None
 
     # Product specifications (solvent-free)
     X_feed: float = 0.0
@@ -62,16 +58,12 @@ class CountercurrentResult:
     extract_product_flow_sf: float = 0.0
     raffinate_product_flow_sf: float = 0.0
 
-    # Difference points
-    delta_E: Optional[Tuple[float, float]] = None
-    delta_S: Optional[Tuple[float, float]] = None
-
 
 # ---------------------------------------------------------------------------
-# Simple countercurrent (no reflux)
+# Countercurrent
 # ---------------------------------------------------------------------------
 
-def solve_countercurrent_simple(
+def solve_countercurrent(
     feed_A: float,
     feed_C: float,
     feed_flow: float,
@@ -80,7 +72,7 @@ def solve_countercurrent_simple(
     eq_model: EquilibriumModel,
 ) -> CountercurrentResult:
     """
-    Solve simple countercurrent using rigorous difference-point (Ponchon-Savarit) method.
+    Solve countercurrent extraction using rigorous difference-point (Ponchon-Savarit) method.
     
     This solver iterates on the final raffinate composition X_1 until the
     corresponding feed stage matches the input feed.
@@ -217,131 +209,13 @@ def solve_countercurrent_simple(
             X_curr = fsolve(lambda x: N_delta + slope_op * (x - X_delta) - eq_model.B_raff_from_X(x)/(eq_model.A_raff_from_X(x)+eq_model.C_raff_from_X(x)), [X_curr * 1.1])[0]
 
     return CountercurrentResult(
-        n_stages=n_stages, feed_stage=n_stages, stages=stages,
-        X_feed=X_F, X_raff_spec=stages[0].X_raff, X_ext_spec=stages[-1].Y_ext,
-        feed_flow_sf=F_sf, delta_E=(X_delta, N_delta), delta_S=(X_delta, N_delta)
+        n_stages=n_stages,
+        stages=stages,
+        X_feed=X_F,
+        X_raff_spec=stages[0].X_raff,
+        X_ext_spec=stages[-1].Y_ext,
+        feed_flow_sf=F_sf,
     )
-
-
-# ---------------------------------------------------------------------------
-# Countercurrent with extract reflux
-# ---------------------------------------------------------------------------
-
-def solve_countercurrent_reflux(
-    feed_A: float, feed_C: float, feed_flow: float,
-    reflux_ratio: float, X_raff_spec: float, X_ext_spec: float,
-    eq_model: EquilibriumModel, max_stages: int = 100,
-) -> CountercurrentResult:
-    """
-    Solve countercurrent extraction with extract reflux using numerical Ponchon-Savarit.
-    """
-    X_F = feed_C / (feed_A + feed_C) if (feed_A + feed_C) > 0 else 0.0
-    F_sf = feed_flow * (feed_A + feed_C) / 100.0
-
-    PE_sf = F_sf * (X_F - X_raff_spec) / (X_ext_spec - X_raff_spec)
-    RN_sf = F_sf - PE_sf
-
-    A_EP, C_EP, B_EP = eq_model.get_extract_point(eq_model.X_from_Y(X_ext_spec))
-    N_ext_product = B_EP / (A_EP + C_EP)
-
-    N_delta_E = (1.0 + reflux_ratio) * N_ext_product
-    X_delta_E = X_ext_spec
-
-    feed_B = 100.0 - feed_A - feed_C
-    N_F = feed_B / (feed_A + feed_C) if (feed_A + feed_C) > 0 else 0.0
-
-    X_delta_S = (PE_sf * X_ext_spec - F_sf * X_F) / (PE_sf - F_sf)
-    N_delta_S = (PE_sf * N_delta_E - F_sf * N_F) / (PE_sf - F_sf)
-
-    stages = []
-    X_curr_raff = X_raff_spec # Actually stepping from top is better for reflux
-    # But current logic steps from product end. Let's step from EXTRACT end.
-    
-    Y_curr = X_ext_spec
-    section = "enriching"
-    feed_stage = 0
-
-    for stage_num in range(1, max_stages + 1):
-        # Equilibrium: find X_eq such that Y(X_eq) = Y_curr
-        X_eq = eq_model.X_from_Y(Y_curr)
-        
-        A_R, C_R, B_R = eq_model.get_raffinate_point(X_eq)
-        A_E, C_E, B_E = eq_model.get_extract_point(X_eq)
-        N_R = B_R / (A_R + C_R)
-        N_E = B_E / (A_E + C_E)
-
-        stages.append(CountercurrentStage(
-            stage_number=stage_num,
-            X_raff=X_eq, Y_ext=Y_curr,
-            N_raff=N_R, N_ext=N_E,
-            A_raff=A_R, C_raff=C_R, B_raff=B_R,
-            A_ext=A_E, C_ext=C_E, B_ext=B_E,
-            section=section,
-        ))
-
-        if X_eq <= X_raff_spec: break
-        if section == "enriching" and X_eq <= X_F:
-            section = "stripping"
-            feed_stage = stage_num
-
-        X_del, N_del = (X_delta_E, N_delta_E) if section == "enriching" else (X_delta_S, N_delta_S)
-        
-        if abs(X_eq - X_del) < 1e-10: break
-        slope_op = (N_R - N_del) / (X_eq - X_del)
-        
-        def op_eq(Y_try):
-            X_try_eq = eq_model.X_from_Y(Y_try)
-            A_Et, C_Et, B_Et = eq_model.get_extract_point(X_try_eq)
-            return N_del + slope_op * (Y_try - X_del) - B_Et/(A_Et+C_Et)
-
-        try:
-            Y_next = brentq(op_eq, 0.0, 1.0, xtol=1e-6)
-        except:
-            Y_next = fsolve(op_eq, [Y_curr * 0.9])[0]
-        
-        Y_curr = float(Y_next)
-
-    if feed_stage == 0: feed_stage = len(stages)
-    
-    # Flows
-    for s in stages:
-        if s.section == "enriching":
-            s.E_flow = PE_sf * (1 + reflux_ratio) * (1 + s.N_ext) / ((s.A_ext + s.C_ext)/100)
-            s.R_flow = PE_sf * reflux_ratio * (1 + s.N_raff) / ((s.A_raff + s.C_raff)/100)
-        else:
-            s.R_flow = RN_sf * (1 + s.N_raff) / ((s.A_raff + s.C_raff)/100)
-            s.E_flow = (RN_sf - F_sf) * (1 + s.N_ext) / ((s.A_ext + s.C_ext)/100)
-
-    result = CountercurrentResult(
-        n_stages=len(stages), feed_stage=feed_stage, stages=stages,
-        reflux_ratio=reflux_ratio, X_feed=X_F, X_raff_spec=X_raff_spec, X_ext_spec=X_ext_spec,
-        feed_flow_sf=F_sf, extract_product_flow_sf=PE_sf, raffinate_product_flow_sf=RN_sf,
-        delta_E=(X_delta_E, N_delta_E), delta_S=(X_delta_S, N_delta_S)
-    )
-    result.min_stages = find_min_stages(X_F, X_raff_spec, X_ext_spec, eq_model)
-    result.min_reflux_ratio = find_min_reflux_ratio(feed_A, feed_C, feed_flow, X_raff_spec, X_ext_spec, eq_model)
-    return result
-
-def find_min_stages(X_feed, X_raff_spec, X_ext_spec, eq_model, max_stages=100):
-    n = 0; X_c = X_raff_spec
-    for _ in range(max_stages):
-        A_E, C_E, B_E = eq_model.get_extract_point(X_c)
-        Y_eq = C_E / (A_E + C_E)
-        n += 1
-        if Y_eq >= X_ext_spec: break
-        X_c = Y_eq
-    return n
-
-def find_min_reflux_ratio(fA, fC, fFlow, Xr, Xe, eq):
-    Xf = fC/(fA+fC); Af, Cf, Bf = eq.get_raffinate_point(Xf)
-    Nf = Bf/(Af+Cf); Aef, Cef, Bef = eq.get_extract_point(Xf)
-    Yf = Cef/(Aef+Cef); Nef = Bef/(Aef+Cef)
-    Ae, Ce, Be = eq.get_extract_point(eq.X_from_Y(Xe))
-    Nep = Be/(Ae+Ce)
-    if abs(Yf - Xf) < 1e-10: return 0.0
-    slope = (Nef - Nf) / (Yf - Xf)
-    Nde_min = Nf + slope * (Xe - Xf)
-    return max(0.0, Nde_min / Nep - 1.0)
 
 def find_max_extract_purity(eq: EquilibriumModel) -> float:
     X_vals = np.linspace(0.0, eq.X_range[1], 500)

@@ -76,8 +76,7 @@ class SimulationTab(QWidget):
         left.setSpacing(12)
 
         intro = QLabel(
-            "Step 2: choose an extraction mode, set feed and operating conditions, "
-            "then run the solver to populate the results table, stage diagram, heatmaps, and animations."
+            "Choose a process mode, set the feed and solvent conditions, and run the solver to generate results, stage plots, heatmaps, and animations."
         )
         intro.setWordWrap(True)
         intro.setProperty("class", "sectionIntro")
@@ -89,8 +88,7 @@ class SimulationTab(QWidget):
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([
             "Crosscurrent",
-            "Countercurrent (Simple)",
-            "Countercurrent (Reflux)",
+            "Countercurrent",
         ])
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode_layout.addWidget(self.mode_combo)
@@ -134,31 +132,6 @@ class SimulationTab(QWidget):
         self.solvent_spin.setToolTip("Fresh solvent per stage for crosscurrent mode.")
         self.op_layout.addRow("Solvent/stage:", self.solvent_spin)
 
-        # Reflux-specific inputs (hidden initially)
-        self.reflux_spin = QDoubleSpinBox()
-        self.reflux_spin.setRange(0.1, 100); self.reflux_spin.setValue(4.5)
-        self.reflux_label = QLabel("Reflux ratio:")
-
-        self.x_raff_spin = QDoubleSpinBox()
-        self.x_raff_spin.setRange(0.001, 0.99); self.x_raff_spin.setValue(0.02)
-        self.x_raff_spin.setDecimals(3)
-        self.x_raff_label = QLabel("X_raff spec:")
-
-        self.x_ext_spin = QDoubleSpinBox()
-        self.x_ext_spin.setRange(0.01, 0.99); self.x_ext_spin.setValue(0.90)
-        self.x_ext_spin.setDecimals(3)
-        self.x_ext_label = QLabel("X_ext spec:")
-
-        self._reflux_widgets = [
-            (self.reflux_label, self.reflux_spin),
-            (self.x_raff_label, self.x_raff_spin),
-            (self.x_ext_label, self.x_ext_spin),
-        ]
-        for label, widget in self._reflux_widgets:
-            self.op_layout.addRow(label, widget)
-            label.hide()
-            widget.hide()
-
         left.addWidget(op_group)
 
         # Run button
@@ -168,7 +141,7 @@ class SimulationTab(QWidget):
         self.run_btn.clicked.connect(self._run_solver)
         left.addWidget(self.run_btn)
 
-        self.status_label = QLabel("Ready for a new simulation run.")
+        self.status_label = QLabel("Set the operating conditions and run a case.")
         self.status_label.setProperty("class", "statusCard")
         self.status_label.setWordWrap(True)
         left.addWidget(self.status_label)
@@ -233,7 +206,7 @@ class SimulationTab(QWidget):
             self.heatmap_tab.set_model(eq_model)
         if self.animation_tab is not None:
             self.animation_tab.set_model(eq_model)
-        self.status_label.setText("Equilibrium model ready. Configure conditions and run the solver.")
+        self.status_label.setText("Equilibrium model ready. Configure a case and run the solver.")
 
     def _build_animation_solver(self):
         if self.eq_model is None:
@@ -251,8 +224,8 @@ class SimulationTab(QWidget):
                 eq_model=self.eq_model,
             )
         if mode == 1:
-            from ..core.countercurrent import solve_countercurrent_simple
-            return solve_countercurrent_simple, dict(
+            from ..core.countercurrent import solve_countercurrent
+            return solve_countercurrent, dict(
                 feed_A=self.feed_A_spin.value(),
                 feed_C=self.feed_C_spin.value(),
                 feed_flow=self.feed_flow_spin.value(),
@@ -260,33 +233,11 @@ class SimulationTab(QWidget):
                 n_stages=self.n_stages_spin.value(),
                 eq_model=self.eq_model,
             )
-        from ..core.countercurrent import solve_countercurrent_reflux
-        return solve_countercurrent_reflux, dict(
-            feed_A=self.feed_A_spin.value(),
-            feed_C=self.feed_C_spin.value(),
-            feed_flow=self.feed_flow_spin.value(),
-            reflux_ratio=self.reflux_spin.value(),
-            X_raff_spec=self.x_raff_spin.value(),
-            X_ext_spec=self.x_ext_spin.value(),
-            eq_model=self.eq_model,
-        )
 
     def _on_mode_changed(self, index):
-        is_reflux = index == 2
         is_simple_cc = index == 1
 
-        # Show/hide reflux-specific widgets
-        for label, widget in self._reflux_widgets:
-            if is_reflux:
-                label.show(); widget.show()
-            else:
-                label.hide(); widget.hide()
-
-        # Show/hide solvent spinner for countercurrent simple
-        if is_reflux:
-            self.solvent_spin.hide()
-            self.n_stages_spin.hide()
-        elif is_simple_cc:
+        if is_simple_cc:
             self.solvent_spin.show()
             self.n_stages_spin.show()
             self.feed_flow_spin.setValue(1000.0)
@@ -306,7 +257,7 @@ class SimulationTab(QWidget):
 
         mode = self.mode_combo.currentIndex()
         self.run_btn.setEnabled(False)
-        self.status_label.setText("Solving current operating point. Results will appear here when the solver finishes.")
+        self.status_label.setText("Running the solver for the current operating point.")
 
         if mode == 0:  # Crosscurrent
             from ..core.crosscurrent import solve_crosscurrent
@@ -320,8 +271,8 @@ class SimulationTab(QWidget):
             )
             self.worker = SolverWorker(solve_crosscurrent, kwargs)
 
-        elif mode == 1:  # Countercurrent simple
-            from ..core.countercurrent import solve_countercurrent_simple
+        elif mode == 1:  # Countercurrent
+            from ..core.countercurrent import solve_countercurrent
             kwargs = dict(
                 feed_A=self.feed_A_spin.value(),
                 feed_C=self.feed_C_spin.value(),
@@ -330,20 +281,7 @@ class SimulationTab(QWidget):
                 n_stages=self.n_stages_spin.value(),
                 eq_model=self.eq_model,
             )
-            self.worker = SolverWorker(solve_countercurrent_simple, kwargs)
-
-        else:  # Countercurrent with reflux
-            from ..core.countercurrent import solve_countercurrent_reflux
-            kwargs = dict(
-                feed_A=self.feed_A_spin.value(),
-                feed_C=self.feed_C_spin.value(),
-                feed_flow=self.feed_flow_spin.value(),
-                reflux_ratio=self.reflux_spin.value(),
-                X_raff_spec=self.x_raff_spin.value(),
-                X_ext_spec=self.x_ext_spin.value(),
-                eq_model=self.eq_model,
-            )
-            self.worker = SolverWorker(solve_countercurrent_reflux, kwargs)
+            self.worker = SolverWorker(solve_countercurrent, kwargs)
 
         self.worker.finished.connect(self._on_solver_done)
         self.worker.error.connect(self._on_solver_error)
@@ -352,16 +290,14 @@ class SimulationTab(QWidget):
     def _on_solver_done(self, result):
         self.run_btn.setEnabled(True)
         self.last_result = result
-        self.status_label.setText("Simulation complete. Review the Results, Stage Diagram, and Heatmaps subtabs.")
+        self.status_label.setText("Simulation complete. Review the results, plots, and heatmaps.")
 
         mode = self.mode_combo.currentIndex()
 
         if mode == 0:
             self._display_crosscurrent_results(result)
-        elif mode == 1:
-            self._display_countercurrent_results(result)
         else:
-            self._display_reflux_results(result)
+            self._display_countercurrent_results(result)
 
         if self.heatmap_tab is not None:
             self.heatmap_tab.set_result(result)
@@ -379,7 +315,7 @@ class SimulationTab(QWidget):
         draw_empty_figure(
             self.canvas.figure,
             "Stage Diagram",
-            "Run a simulation to see both the X-Y stepping view and the ternary process path for the selected extraction mode.",
+            "Run a simulation to populate the X-Y stage plot and the ternary process path.",
         )
         self.canvas.draw()
 
@@ -437,17 +373,6 @@ class SimulationTab(QWidget):
             f"Terminal extract Y: <b>{stages[-1].Y_ext:.4f}</b>"
         )
         self._plot_countercurrent(result)
-
-    def _display_reflux_results(self, result):
-        self._display_countercurrent_results(result)
-
-        extra = (
-            f"<br><b>Reflux:</b> r = {result.reflux_ratio:.2f}, "
-            f"Min stages: {result.min_stages}, "
-            f"Min reflux: {result.min_reflux_ratio:.3f}, "
-            f"Feed stage: {result.feed_stage}"
-        )
-        self.summary_label.setText(self.summary_label.text() + extra)
 
     def _plot_crosscurrent(self, result):
         import numpy as np
@@ -548,11 +473,6 @@ class SimulationTab(QWidget):
 
         ax_ternary.plot(raff_B, raff_C, "o-", color="#1f77b4", lw=1.8, ms=6, label="Raffinate path")
         ax_ternary.plot(ext_B, ext_C, "s-", color="#d62728", lw=1.2, ms=5, alpha=0.85, label="Extract path")
-
-        if hasattr(result, "feed_stage") and result.feed_stage:
-            feed_idx = max(0, min(len(result.stages) - 1, result.feed_stage - 1))
-            fs = result.stages[feed_idx]
-            ax_ternary.plot(fs.B_raff, fs.C_raff, marker="*", color="gold", markersize=12, label="Feed stage")
 
         ax_ternary.set_title("Ternary Process Path")
         ax_ternary.legend(fontsize=9, loc="best")
