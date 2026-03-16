@@ -124,7 +124,12 @@ class HeatmapTab(QWidget):
             "Heatmaps and Profiles",
             "Run a simulation to populate the stage-wise heatmaps and profile views.",
         )
-        self.canvas.draw()
+        self._refresh_canvas()
+
+    def _refresh_canvas(self) -> None:
+        """Redraw the existing canvas figure without replacing the Figure object."""
+        self.canvas.draw_idle()
+        self.canvas.flush_events()
 
     def _show_heatmap(self, hmap_type: str):
         if self.result is None:
@@ -152,28 +157,100 @@ class HeatmapTab(QWidget):
             self._show_countercurrent_heatmap()
             return
 
-        from ..viz.heatmaps import (
-            composition_heatmap,
-            flowrate_heatmap,
-            removal_heatmap,
-            combined_heatmap,
-        )
-
         self.canvas.figure.clear()
+        self._render_crosscurrent_heatmap(hmap_type)
+        self._refresh_canvas()
+        animate_widget_in(self.canvas)
+
+    def _render_crosscurrent_heatmap(self, hmap_type: str) -> None:
+        """Render crosscurrent heatmaps directly into the existing canvas figure."""
+        import pandas as pd
+        import seaborn as sns
+
+        fig = self.canvas.figure
+        stages = self.result.stages
+        stage_labels = [f"S{s.stage_number}" for s in stages]
 
         if hmap_type == "composition":
-            fig = composition_heatmap(self.result)
-        elif hmap_type == "flowrate":
-            fig = flowrate_heatmap(self.result)
-        elif hmap_type == "removal":
-            fig = removal_heatmap(self.result)
-        else:
-            fig = combined_heatmap(self.result)
+            ax = fig.add_subplot(111)
+            comp_data = pd.DataFrame({
+                "A (Carrier)": [s.A_raff for s in stages],
+                "C (Solute)": [s.C_raff for s in stages],
+                "B (Solvent)": [s.B_raff for s in stages],
+            }, index=stage_labels).T
+            sns.heatmap(
+                comp_data, annot=True, fmt=".2f", cmap="YlOrRd",
+                linewidths=0.5, ax=ax, cbar_kws={"label": "wt%"},
+            )
+            ax.set_title("Raffinate Composition (wt%) by Stage", fontsize=14)
+            ax.set_ylabel("Component")
+            ax.set_xlabel("Stage")
 
-        # Copy figure content to canvas
-        self.canvas.figure = fig
-        self.canvas.draw()
-        animate_widget_in(self.canvas)
+        elif hmap_type == "flowrate":
+            ax = fig.add_subplot(111)
+            flow_data = pd.DataFrame({
+                "Raffinate (R)": [s.R_flow for s in stages],
+                "Extract (E)": [s.E_flow for s in stages],
+            }, index=stage_labels).T
+            sns.heatmap(
+                flow_data, annot=True, fmt=".1f", cmap="Blues",
+                linewidths=0.5, ax=ax, cbar_kws={"label": "kg"},
+            )
+            ax.set_title("Flow Rates (kg) by Stage", fontsize=14)
+            ax.set_ylabel("Stream")
+            ax.set_xlabel("Stage")
+
+        elif hmap_type == "removal":
+            ax = fig.add_subplot(111)
+            rem_data = pd.DataFrame({
+                "Per-Stage Removal (%)": [s.pct_removal_stage for s in stages],
+                "Cumulative Removal (%)": [s.pct_removal_cumul for s in stages],
+            }, index=stage_labels).T
+            sns.heatmap(
+                rem_data, annot=True, fmt=".2f", cmap="Greens",
+                linewidths=0.5, ax=ax, cbar_kws={"label": "%"},
+            )
+            ax.set_title("Solute Removal (%) by Stage", fontsize=14)
+            ax.set_ylabel("Metric")
+            ax.set_xlabel("Stage")
+
+        else:
+            axes = fig.subplots(3, 1)
+
+            comp_data = pd.DataFrame({
+                "A (wt%)": [s.A_raff for s in stages],
+                "C (wt%)": [s.C_raff for s in stages],
+                "B (wt%)": [s.B_raff for s in stages],
+                "X (sf)": [s.X_raff for s in stages],
+            }, index=stage_labels).T
+            sns.heatmap(
+                comp_data, annot=True, fmt=".2f", cmap="YlOrRd",
+                linewidths=0.5, ax=axes[0], cbar_kws={"label": "Value"},
+            )
+            axes[0].set_title("Raffinate Composition", fontsize=12)
+
+            flow_data = pd.DataFrame({
+                "R (kg)": [s.R_flow for s in stages],
+                "E (kg)": [s.E_flow for s in stages],
+            }, index=stage_labels).T
+            sns.heatmap(
+                flow_data, annot=True, fmt=".1f", cmap="Blues",
+                linewidths=0.5, ax=axes[1], cbar_kws={"label": "kg"},
+            )
+            axes[1].set_title("Flow Rates", fontsize=12)
+
+            rem_data = pd.DataFrame({
+                "Stage (%)": [s.pct_removal_stage for s in stages],
+                "Cumul. (%)": [s.pct_removal_cumul for s in stages],
+            }, index=stage_labels).T
+            sns.heatmap(
+                rem_data, annot=True, fmt=".2f", cmap="Greens",
+                linewidths=0.5, ax=axes[2], cbar_kws={"label": "%"},
+            )
+            axes[2].set_title("Solute Removal", fontsize=12)
+            fig.suptitle("Crosscurrent Extraction Summary", fontsize=16)
+
+        fig.tight_layout()
 
     def _show_countercurrent_heatmap(self):
         """Show a simple heatmap for countercurrent results."""
@@ -211,7 +288,7 @@ class HeatmapTab(QWidget):
                     linewidths=0.5, ax=ax)
         ax.set_title("Countercurrent Stage Properties")
         self.canvas.figure.tight_layout()
-        self.canvas.draw()
+        self._refresh_canvas()
         animate_widget_in(self.canvas)
 
     def _export(self):
@@ -280,7 +357,8 @@ class HeatmapTab(QWidget):
 
         fig.suptitle('Concentration & Flow Rate Profiles', fontsize=14, y=1.01)
         fig.tight_layout()
-        self.canvas.draw()
+        self._refresh_canvas()
+        animate_widget_in(self.canvas)
         animate_widget_in(self.canvas)
 
     def _show_raff_vs_ext(self):
@@ -330,7 +408,8 @@ class HeatmapTab(QWidget):
         ax.grid(True, alpha=0.3, axis='y')
 
         fig.tight_layout()
-        self.canvas.draw()
+        self._refresh_canvas()
+        animate_widget_in(self.canvas)
 
     def _show_removal_curve(self):
         """Per-stage and cumulative % removal line chart."""
@@ -386,4 +465,5 @@ class HeatmapTab(QWidget):
         ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=10, loc='center right')
 
         fig.tight_layout()
-        self.canvas.draw()
+        self._refresh_canvas()
+        animate_widget_in(self.canvas)
